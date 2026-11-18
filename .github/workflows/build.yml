@@ -1,0 +1,45 @@
+# Builds vUSALink App on every push / pull request.
+# Pushing a version tag (e.g. v0.2.0) also publishes a GitHub Release with the ready-to-run zip.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (Windows' built-in .NET Framework compiler)
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $v = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { 'dev-' + $env:GITHUB_SHA.Substring(0, 7) }
+          $pkg = "vUSALink-App-$v"
+          New-Item -ItemType Directory $pkg | Out-Null
+          Copy-Item bin/vUSALinkApp.exe, bin/*.dll, README.md, LICENSE, lib/WebView2-LICENSE.txt $pkg
+          Compress-Archive -Path "$pkg/*" -DestinationPath "$pkg.zip"
+          "PKG=$pkg" >> $env:GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PKG }}
+          path: ${{ env.PKG }}.zip
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME "$env:PKG.zip" --title "vUSALink App $env:GITHUB_REF_NAME" --generate-notes

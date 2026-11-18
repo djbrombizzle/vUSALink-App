@@ -1,0 +1,15 @@
+# Build output (rebuilt by build.ps1 / GitHub Actions)
+bin/
+*.log
+
+# Release packaging
+vUSALink-App-*/
+*.zip
+
+# Editors / OS
+.vs/
+.vscode/
+*.suo
+*.user
+Thumbs.db
+desktop.ini
