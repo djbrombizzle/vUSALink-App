@@ -41,6 +41,7 @@ namespace VusaLinkApp
         Border btnMirror, btnCrcBar, btnTop;
         CoreWebView2Environment env;
         bool ready, retryPending;
+        int apiVersion;              // vUSALinkEDST host API version on the loaded page (0 = older page)
         int forwarded;
 
         public MainWindow(string url)
@@ -240,8 +241,13 @@ namespace VusaLinkApp
             if (e.IsSuccess)
             {
                 SetStatus(Short(core.Source), Theme.Dim);
-                await ApplyRefreshRate();
-                await InstallAltMenuHook();
+                apiVersion = await DetectHostApi();
+                if (apiVersion < 1)
+                {
+                    // Older EDST page without the host API: patch it the old way (remove after one release).
+                    await LegacyApplyRefreshRate();
+                    await LegacyInstallAltMenuHook();
+                }
                 var snap = Environment.GetEnvironmentVariable("VUSALINK_SNAPSHOT");
                 if (!string.IsNullOrEmpty(snap)) await Snapshot(snap);
                 return;
@@ -256,10 +262,27 @@ namespace VusaLinkApp
             Navigate();
         }
 
-        // The EDST page asks the hub for traffic every 30 s (20 s view-only). The VATSIM feed itself updates
-        // every ~15 s, so the companion re-schedules the page's own refresh at the feed cadence. LIST windows
-        // keep their 4 s rate. Applied after every load; the page's later scheduleVatsim() calls use it too.
-        async Task ApplyRefreshRate()
+        // The web EDST is the standard; this app is a shell around it. The page publishes a small, stable host API
+        // (window.vUSALinkEDST: version, command(), status()) and owns all EDST behaviour: what a command means,
+        // amendments, the altitude menu, the refresh rate. The app only passes on what's typed in CRC.
+        async Task<int> DetectHostApi()
+        {
+            try
+            {
+                var r = await web.CoreWebView2.ExecuteScriptAsync(
+                    "(window.vUSALinkEDST&&typeof vUSALinkEDST.command==='function'&&vUSALinkEDST.version)||0");
+                int v;
+                int.TryParse(r, out v);
+                Log.Info("EDST host API version " + v);
+                return v;
+            }
+            catch (Exception ex) { Log.Info("Host API check failed: " + ex.Message); return 0; }
+        }
+
+        // ---- Legacy: EDST pages from before the host API (vatflow before Nov 2026). Remove after one release. ----
+
+        // Re-schedules the page's own refresh at the VATSIM feed cadence (the old page used 30 s).
+        async Task LegacyApplyRefreshRate()
         {
             if (cfg.RefreshSeconds <= 0) return;
             int sec = Math.Max(5, cfg.RefreshSeconds);
@@ -278,7 +301,7 @@ namespace VusaLinkApp
 
         // When the EDST altitude menu opens for an aircraft whose altitude was amended from CRC, pre-select that
         // altitude (the EDST's own stageAlt) so UPLINK is one click. One-shot per amendment.
-        async Task InstallAltMenuHook()
+        async Task LegacyInstallAltMenuHook()
         {
             var js =
                 "(function(){if(window.__edstcAltHook||typeof openAltMenu!=='function'||typeof stageAlt!=='function')return 'skip';" +
@@ -384,6 +407,27 @@ namespace VusaLinkApp
 
         void OnCrcCommand(string raw)
         {
+            if (apiVersion >= 1) HostCommand(raw);
+            else LegacyCommand(raw);
+        }
+
+        // Hands a CRC command to the EDST's host API. The page decides what it means (/U uplink, plain QZ
+        // amendment, reject) and shows its own MCA feedback; commands it doesn't handle come back "ignored".
+        void HostCommand(string raw)
+        {
+            var cmd = CrcForward.Gate(raw);
+            if (cmd == null || !ready) return;
+            var js =
+                "(function(c){var post=function(o){o.t='host';o.cmd=c;window.chrome.webview.postMessage(JSON.stringify(o));};" +
+                "if(!window.vUSALinkEDST){post({ok:false,error:'EDST NOT READY'});return;}" +
+                "vUSALinkEDST.command(c,{source:'crc'}).then(function(r){r=r||{};" +
+                "post({ok:!!r.ok,action:r.action||'',error:r.error||'',flid:r.flid||''});})" +
+                ".catch(function(){post({ok:false,error:'SEND FAIL'});});})(" + Json.Write(cmd) + ");";
+            web.CoreWebView2.ExecuteScriptAsync(js);
+        }
+
+        void LegacyCommand(string raw)
+        {
             int fl; string id;
             if (CrcForward.Amend(raw, out fl, out id)) { AmendAltitude(fl, id); return; }
             var cmd = CrcForward.Uplink(raw);
@@ -433,11 +477,14 @@ namespace VusaLinkApp
             {
                 var o = Json.Parse(e.TryGetWebMessageAsString());
                 var t = Json.Str(o, "t");
-                if (t != "mca" && t != "amend") return;
+                if (t != "mca" && t != "amend" && t != "host") return;
                 var cmd = Json.Str(o, "cmd");
+                var action = Json.Str(o, "action") ?? "";
+                if (action == "ignored") { Log.Info("Ignored by EDST: " + cmd); return; }
+                bool amend = t == "amend" || action == "amend";
                 var flid = Json.Str(o, "flid");
-                if (t == "amend" && !string.IsNullOrEmpty(flid) && !cmd.EndsWith(" " + flid)) cmd += " (" + flid + ")";
-                ShowResult(cmd, Json.Bool(o, "ok") == true, Json.Str(o, "error"), t == "amend");
+                if (amend && !string.IsNullOrEmpty(flid) && !cmd.EndsWith(" " + flid)) cmd += " (" + flid + ")";
+                ShowResult(cmd, Json.Bool(o, "ok") == true, Json.Str(o, "error"), amend);
             }
             catch (Exception ex) { Log.Info("Web message: " + ex.Message); }
         }

@@ -7,6 +7,11 @@ CPDLC uplink by typing the command in CRC, without typing it again in the EDST.
 The EDST is loaded live, so every update to VATFLOW's EDST shows up in the app without a new download.
 CRC itself is never changed: the app doesn't read or write CRC's files or connect to vNAS.
 
+**The web EDST is the standard; this app is another way to use it.** All EDST behaviour lives in the web page:
+what a command means, amendments, menus and the refresh rate. The app adds only what a browser can't do:
+it passes on what you type in CRC, keeps the window on top, remembers your sign-in and opens pop-ups as windows.
+It talks to the page through one small, stable host API (see [How the app talks to the EDST](#how-the-app-talks-to-the-edst)).
+
 ## Download
 
 1. Download the latest `vUSALink-App-vX.Y.Z.zip` from [Releases](../../releases).
@@ -27,12 +32,13 @@ the app tells you where to get it.
 - **Stays signed in:** your VATSIM sign-in, layout, filters and MCA position are saved by the app between launches.
 - **Pop-up windows:** VATFLOW pages the EDST opens (CPDLC Map, list windows, sign-in) open as app windows that share
   your sign-in. Other links open in your normal browser.
-- **15-second traffic refresh** to match the VATSIM data feed. The website refreshes every 30 s.
 - **CRC mirroring** (below).
 
 ## CRC mirroring
 
-While CRC is the focused window, the app watches what you type into CRC's MCA.
+While CRC is the focused window, the app watches what you type into CRC's MCA. Lines starting with `QZ`, `QQ`,
+`QU` or `QS` are handed to the EDST, which handles them exactly as if you had typed them into the EDST's own MCA.
+Nothing else typed in CRC (including chat) is passed on.
 
 ### Altitude amendment: nothing is sent
 
@@ -59,8 +65,8 @@ shows why in red.
 
 - **Commands you finish by clicking an aircraft in CRC.** The app only sees typed text, so it never gets the callsign.
   Type the callsign.
-- **CRC CIDs** (`QZ 240 4A2`). vNAS assigns them and they aren't in the VATSIM data, so the EDST can't match them.
-  The top bar shows `CID NOT KNOWN TO EDST - USE CALLSIGN`.
+- **CRC CIDs** (`QZ 240 4A2`). vNAS assigns them and they aren't in the VATSIM data, so the EDST can't match them
+  and ignores the command. Type the callsign.
 - **CRC dot-aliases, data block work and everything else.** Ignored.
 
 ## Top bar
@@ -80,14 +86,27 @@ Settings (window position, zoom, toggles) are in `%LOCALAPPDATA%\vUSALinkApp\set
 
 | Setting | Default | |
 |---|---|---|
-| `RefreshSeconds` | `15` | EDST traffic refresh. `0` keeps the page's own rate |
 | `Url` | `https://vatflow.io/vusalink/edst/` | EDST page to load. A URL on the command line overrides it |
+| `RefreshSeconds` | `15` | Only used with older EDST pages that predate the host API (they refreshed every 30 s). Current pages set their own rate |
+
+## How the app talks to the EDST
+
+The EDST page publishes `window.vUSALinkEDST`:
+
+| Member | |
+|---|---|
+| `version` | `1`. Bumped only if the API itself changes |
+| `command(text, {source})` | Runs an ERAM command the same way the EDST MCA does. Returns `{ok, action: 'uplink' \| 'amend' \| 'ignored', flid, error}`. With `source: 'crc'` the callsign must be typed (no fallback to the selected row), and commands the EDST doesn't handle come back `ignored` without touching the MCA |
+| `status()` | `{signedIn, canControl, testMode, listMode, refreshMs}` |
+
+Everything else in the page is internal and free to change. If the loaded page has no host API (an older EDST),
+the app falls back to its previous method for one release.
 
 ## Limits
 
 - Needs internet, because the EDST is served from vatflow.io. If it can't load, the top bar shows OFFLINE and retries every 15 s.
-- Traffic is as fresh as the VATSIM data feed (about 15 s). CRC gets its traffic from vNAS over an encrypted
-  connection and offers no local feed, so the app can't read CRC's traffic.
+- Traffic is as fresh as the VATSIM data feed (about 15 s; the EDST refreshes every 15 s). CRC gets its traffic
+  from vNAS over an encrypted connection and offers no local feed, so the app can't read CRC's traffic.
 
 ## Build from source
 

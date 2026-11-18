@@ -4,14 +4,23 @@ using System.Text.RegularExpressions;
 
 namespace VusaLinkApp
 {
-    // Decides what a command typed into CRC's MCA means for the EDST.
-    //  - Uplink: QZ / QQ / QU / QS with the /U modifier and a typed aircraft -> EDST MCA (sends CPDLC).
-    //  - Amend:  plain "QZ <alt> <FLID>" (no /U) -> EDST assigned altitude is updated locally, nothing is sent,
-    //            so the controller can uplink it from the EDST altitude menu.
-    // Everything else (data block work, clicked targets, dot-aliases) is ignored.
+    // Filters what is typed into CRC before it reaches the EDST page.
+    //
+    // Gate(): with the EDST host API (current pages) the page decides what a command means. The app only
+    // passes on lines that start with an EDST verb. The keyboard hook sees everything typed while CRC is
+    // focused (chat too), so this is a privacy gate, not EDST logic.
+    //
+    // Uplink() / Amend(): legacy rules for EDST pages from before the host API. Remove after one release.
     static class CrcForward
     {
         static readonly string[] UplinkVerbs = { "QZ", "QQ", "QU", "QS" };
+
+        public static string Gate(string raw)
+        {
+            string text;
+            var toks = Tokens(raw, out text);
+            return toks.Length >= 2 && Array.IndexOf(UplinkVerbs, toks[0]) >= 0 ? text : null;
+        }
         static readonly Regex Callsign = new Regex(@"^[A-Z][A-Z0-9]{1,7}$");
         static readonly Regex EramCid = new Regex(@"^[A-Z0-9]{3}$");
 
