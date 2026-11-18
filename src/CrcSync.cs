@@ -2,25 +2,40 @@ using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Windows.Threading;
 
 namespace VusaLinkApp
 {
     // Watches commands typed into CRC's MCA so the app can hand the CPDLC ones to the EDST (see CrcForward).
     // Keystrokes are only looked at while a CRC window is in the foreground; nothing is stored or sent anywhere.
+    //
+    // CRC doesn't know the EDST's uplink modifiers ("QZ 240 DAL123 /U" -> MESSAGE TOO LONG). When Enter is
+    // pressed on such a line, the app passes the full command to the EDST, holds back that Enter, erases the
+    // modifiers from CRC's MCA with Backspaces and presses Enter itself, so CRC gets "QZ 240 DAL123" and
+    // amends as usual. This only happens when the app knows exactly what's in CRC's MCA (no cursor keys,
+    // Delete or Ctrl shortcuts were used on the line).
     class CrcSync : IDisposable
     {
         public event Action<string> CommandEntered;
+        public event Action<string> CommandSkipped;   // line was edited with cursor keys etc.: not passed on
         public bool Enabled = true;
+        public string ProcessName = "CRC";      // VUSALINK_CRC_PROCESS can point this at a stand-in for testing
+        public Func<string, int> TrimForCrc;    // characters to erase before CRC gets the line (0 = none)
 
         readonly StringBuilder buffer = new StringBuilder();
         readonly LowLevelKeyboardProc proc;
+        readonly Dispatcher dispatcher;
         IntPtr hook = IntPtr.Zero;
         IntPtr lastHwnd = IntPtr.Zero;
         bool lastWasCrc;
+        bool dirty;   // the buffer may not match CRC's MCA (cursor moved, text recalled, ...)
+
+        static readonly IntPtr Marker = (IntPtr)0x56555341; // "VUSA": tags keystrokes this app injects
 
         public CrcSync()
         {
             proc = HookProc; // keep the delegate alive for the lifetime of the hook
+            dispatcher = Dispatcher.CurrentDispatcher;
         }
 
         public void Start()
@@ -38,6 +53,12 @@ namespace VusaLinkApp
             hook = IntPtr.Zero;
         }
 
+        void Reset()
+        {
+            buffer.Clear();
+            dirty = false;
+        }
+
         bool CrcInForeground()
         {
             var hwnd = GetForegroundWindow();
@@ -49,10 +70,10 @@ namespace VusaLinkApp
             try
             {
                 using (var p = Process.GetProcessById((int)pid))
-                    lastWasCrc = string.Equals(p.ProcessName, "CRC", StringComparison.OrdinalIgnoreCase);
+                    lastWasCrc = string.Equals(p.ProcessName, ProcessName, StringComparison.OrdinalIgnoreCase);
             }
             catch { }
-            if (!lastWasCrc) buffer.Clear();
+            Reset();
             return lastWasCrc;
         }
 
@@ -60,18 +81,22 @@ namespace VusaLinkApp
         {
             try
             {
-                if (nCode >= 0 && Enabled && (wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN) && CrcInForeground())
-                    OnKey(Marshal.ReadInt32(lParam));
+                if (nCode >= 0 && Enabled && (wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN)
+                    && Marshal.ReadIntPtr(lParam, 16) != Marker && CrcInForeground())
+                {
+                    if (OnKey(Marshal.ReadInt32(lParam))) return (IntPtr)1;   // Enter held back; re-sent below
+                }
             }
             catch { }
             return CallNextHookEx(hook, nCode, wParam, lParam);
         }
 
-        void OnKey(int vk)
+        // Returns true to keep the key from reaching CRC.
+        bool OnKey(int vk)
         {
             bool shift = (GetKeyState(0x10) & 0x8000) != 0;
             bool ctrl = (GetKeyState(0x11) & 0x8000) != 0;
-            if (ctrl) return;
+            if (ctrl) { dirty = true; return false; }                         // e.g. Ctrl+R recalls a command in CRC
             if (vk >= 0x41 && vk <= 0x5A) buffer.Append((char)vk);
             else if (vk >= 0x30 && vk <= 0x39 && !shift) buffer.Append((char)vk);
             else if (vk >= 0x60 && vk <= 0x69) buffer.Append((char)('0' + vk - 0x60));
@@ -85,19 +110,71 @@ namespace VusaLinkApp
             else if (vk == 0xDD && !shift) buffer.Append(']');
             else if (vk == 0xC0) buffer.Append(shift ? '~' : '`');
             else if (vk == 0x08) { if (buffer.Length > 0) buffer.Length--; }
-            else if (vk == 0x1B) buffer.Clear();
+            else if (vk == 0x1B) Reset();
+            else if ((vk >= 0x21 && vk <= 0x28) || vk == 0x2D || vk == 0x2E || vk == 0x09) dirty = true; // PgUp..Down, Ins, Del, Tab
             else if (vk == 0x0D)
             {
-                var cmd = buffer.ToString().Trim();
-                buffer.Clear();
-                if (cmd != "" && CommandEntered != null) CommandEntered(cmd);
+                var raw = buffer.ToString();
+                bool exact = !dirty;
+                Reset();
+                var cmd = raw.Trim();
+                if (cmd == "") return false;
+                if (!exact)
+                {
+                    // What's in CRC's MCA may differ from what the app saw, so never send a guess to the EDST.
+                    if (CommandSkipped != null) CommandSkipped(cmd);
+                    return false;
+                }
+                int erase = TrimForCrc != null ? TrimForCrc(raw) : 0;
+                if (CommandEntered != null) CommandEntered(cmd);
+                if (erase > 0)
+                {
+                    // Let this hook call return first, then rewrite CRC's line.
+                    dispatcher.BeginInvoke(new Action(() => SendKeys(0x08, erase, true)));
+                    Log.Info("CRC line trimmed by " + erase + " chars before Enter: " + cmd);
+                    return true;
+                }
+                return false;
             }
-            if (buffer.Length > 200) buffer.Clear();
+            if (buffer.Length > 200) Reset();
+            return false;
+        }
+
+        static void SendKeys(ushort vk, int count, bool thenEnter)
+        {
+            int n = count * 2 + (thenEnter ? 2 : 0);
+            var inputs = new INPUT[n];
+            int i = 0;
+            for (int k = 0; k < count; k++) { inputs[i++] = Key(vk, false); inputs[i++] = Key(vk, true); }
+            if (thenEnter) { inputs[i++] = Key(0x0D, false); inputs[i++] = Key(0x0D, true); }
+            if (SendInput((uint)n, inputs, Marshal.SizeOf(typeof(INPUT))) != n)
+                Log.Info("CRC sync: SendInput failed " + Marshal.GetLastWin32Error());
+        }
+
+        static INPUT Key(ushort vk, bool up)
+        {
+            return new INPUT
+            {
+                type = INPUT_KEYBOARD,
+                u = new InputUnion { ki = new KEYBDINPUT { wVk = vk, dwFlags = up ? KEYEVENTF_KEYUP : 0, dwExtraInfo = Marker } }
+            };
         }
 
         const int WH_KEYBOARD_LL = 13, WM_KEYDOWN = 0x100, WM_SYSKEYDOWN = 0x104;
+        const uint INPUT_KEYBOARD = 1, KEYEVENTF_KEYUP = 2;
         delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
+        [StructLayout(LayoutKind.Sequential)]
+        struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr dwExtraInfo; }
+        [StructLayout(LayoutKind.Sequential)]
+        struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
+        [StructLayout(LayoutKind.Explicit)]
+        struct InputUnion { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
+        [StructLayout(LayoutKind.Sequential)]
+        struct INPUT { public uint type; public InputUnion u; }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
         [DllImport("user32.dll", SetLastError = true)]
         static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
         [DllImport("user32.dll")]

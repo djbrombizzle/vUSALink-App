@@ -77,6 +77,17 @@ namespace VusaLinkApp
             PreviewKeyDown += OnKey;
 
             sync.Enabled = cfg.Mirror;
+            sync.TrimForCrc = CrcForward.CrcTrimLength;
+            var crcProc = Environment.GetEnvironmentVariable("VUSALINK_CRC_PROCESS");
+            if (!string.IsNullOrEmpty(crcProc)) sync.ProcessName = crcProc;
+            sync.CommandSkipped += cmd => Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (CrcForward.Gate(cmd) == null) return;
+                Log.Info("Edited line not mirrored: " + cmd);
+                last.Text = "✗ LINE EDITED IN CRC - NOT MIRRORED, RETYPE IT";
+                last.Foreground = Theme.Amber;
+                last.ToolTip = "Cursor keys, Delete or a Ctrl shortcut were used, so the app can't be sure what CRC's MCA held";
+            }));
             sync.CommandEntered += cmd => Dispatcher.BeginInvoke(new Action(() => OnCrcCommand(cmd)));
             sync.Start();
             crcTimer.Tick += (s, e) => UpdateCrcState();

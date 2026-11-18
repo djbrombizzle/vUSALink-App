@@ -48,7 +48,10 @@ click. The app's top bar shows `✓ QZ 240 DAL123 AMENDED` in yellow. `FL240` an
 
 ### CPDLC uplink: `/U`
 
-Add `/U` and the command goes straight to the EDST's MCA and is sent, as if you'd typed it in the EDST:
+Add `/U` and the command goes straight to the EDST's MCA and is sent, as if you'd typed it in the EDST.
+**CRC still amends too.** CRC doesn't know `/U` (it answers `MESSAGE TOO LONG`), so when you press Enter the app
+holds that Enter back, erases the trailing EDST modifiers from CRC's MCA, and presses Enter for you. CRC gets
+`QZ 350 DAL123` and amends its data block, and the EDST sends the uplink. One command does both.
 
 | Type in CRC | Uplink |
 |---|---|
@@ -63,6 +66,9 @@ shows why in red.
 
 ### What isn't mirrored
 
+- **Lines you edited in CRC with cursor keys, Home/End, Delete or a Ctrl shortcut (such as Ctrl+R recall).** The app
+  can't be sure what CRC's MCA then holds, so it passes nothing on and doesn't touch CRC's line. The top bar shows
+  `LINE EDITED IN CRC - NOT MIRRORED, RETYPE IT`. Backspace is fine.
 - **Commands you finish by clicking an aircraft in CRC.** The app only sees typed text, so it never gets the callsign.
   Type the callsign.
 - **CRC CIDs** (`QZ 240 4A2`). vNAS assigns them and they aren't in the VATSIM data, so the EDST can't match them
@@ -129,6 +135,9 @@ Debug switches (environment variables):
 | `VUSALINK_INJECT=<command>` | Send a command through the CRC path first (`{CS}` = first aircraft on the list) |
 | `VUSALINK_PRE` / `VUSALINK_POST` | Page scripts to run before / after it |
 | `VUSALINK_PROBE=<seconds>` | Log when the page refreshes traffic |
+| `VUSALINK_CRC_PROCESS=<name>` | Treat another process as CRC (for testing mirroring without CRC) |
+
+`build.ps1 -Out <folder>` builds into another folder, for example while the app in `bin\` is running.
 
 The log is `bin\vUSALinkApp.log`.
 

@@ -21,6 +21,23 @@ namespace VusaLinkApp
             var toks = Tokens(raw, out text);
             return toks.Length >= 2 && Array.IndexOf(UplinkVerbs, toks[0]) >= 0 ? text : null;
         }
+
+        // EDST-only modifiers CRC doesn't understand ("QZ 240 DAL123 /U" -> MESSAGE TOO LONG in CRC).
+        static readonly string[] EdstMods = { "U", "PD", "IMM", "EXP", "TFC", "RES", "WX", "OK" };
+        static readonly Regex TrailingMods = new Regex(@"(\s+/[A-Za-z/]+)+\s*$");
+
+        // How many characters to erase from the end of CRC's MCA line before CRC gets it: the trailing EDST
+        // modifiers, when they include /U. "QZ 240 DAL123 /PD /U" -> 8, leaving "QZ 240 DAL123" for CRC.
+        public static int CrcTrimLength(string raw)
+        {
+            if (Gate(raw) == null) return 0;
+            var m = TrailingMods.Match(raw ?? "");
+            if (!m.Success || m.Index == 0) return 0;
+            var mods = m.Value.Split(new[] { ' ', '\t', '/' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.ToUpperInvariant()).ToList();
+            if (!mods.Contains("U") || mods.Any(x => Array.IndexOf(EdstMods, x) < 0)) return 0;
+            return m.Length;
+        }
         static readonly Regex Callsign = new Regex(@"^[A-Z][A-Z0-9]{1,7}$");
         static readonly Regex EramCid = new Regex(@"^[A-Z0-9]{3}$");
 

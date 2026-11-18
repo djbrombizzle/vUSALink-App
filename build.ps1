@@ -1,10 +1,11 @@
 # Builds vUSALink App with the C# compiler that ships with Windows (.NET Framework 4.8) - no SDK needed.
 # WebView2 SDK DLLs (Microsoft.Web.WebView2 NuGet package, Microsoft-signed) live in .\lib and are copied next to the exe.
+param([string]$Out)   # optional output folder (default: .\bin)
 $ErrorActionPreference = 'Stop'
 $fw  = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319"
 $wpf = "$fw\WPF"
 $lib = Join-Path $PSScriptRoot 'lib'
-$out = Join-Path $PSScriptRoot 'bin'
+$out = if ($Out) { $Out } else { Join-Path $PSScriptRoot 'bin' }
 New-Item -ItemType Directory -Force $out | Out-Null
 
 $src = Get-ChildItem (Join-Path $PSScriptRoot 'src') -Filter *.cs | ForEach-Object { $_.FullName }
