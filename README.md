@@ -53,16 +53,45 @@ Add `/U` and the command goes straight to the EDST's MCA and is sent, as if you'
 holds that Enter back, erases the trailing EDST modifiers from CRC's MCA, and presses Enter for you. CRC gets
 `QZ 350 DAL123` and amends its data block, and the EDST sends the uplink. One command does both.
 
-| Type in CRC | Uplink |
-|---|---|
-| `QZ 350 DAL123 /U` | Assigned altitude |
-| `QQ 240 DAL123 /U` | Interim altitude |
-| `QU LUNNI DAL123 /U` | Proceed direct |
-| `QS 270 DAL123 /U` / `QS /280 DAL123 /U` | Heading / speed |
+#### `/U` commands that work
 
-The EDST's modifiers (`/PD /IMM /EXP /TFC /RES /WX`) pass through. You must be signed in and verified in the EDST, and the
-aircraft must be logged on to CPDLC. Otherwise the EDST rejects it (`NOT AUTH`, `NO CPDLC`, `NO TRACK`) and the top bar
-shows why in red.
+Type the callsign. The CRC function key works in place of typing the verb (it puts the verb on CRC's line for you).
+
+| Command | CRC key | What the pilot receives | Example |
+|---|---|---|---|
+| `QZ <alt> <callsign> /U` | F5 | Assigned altitude: `CLIMB TO AND MAINTAIN` / `DESCEND TO AND MAINTAIN` / `MAINTAIN` | `QZ 350 DAL123 /U` → `CLIMB TO AND MAINTAIN FL350` |
+| `QQ <alt> <callsign> /U` | F8 | Interim altitude (same CPDLC message as QZ) | `QQ 240 DAL123 /U` → `DESCEND TO AND MAINTAIN FL240` |
+| `QU <fix> <callsign> /U` | F6 | `PROCEED DIRECT TO <fix>` (first fix only) | `QU LUNNI DAL123 /U` → `PROCEED DIRECT TO LUNNI` |
+| `QS <hdg> <callsign> /U` | type it | `FLY HEADING <hdg>` | `QS 270 DAL123 /U` → `FLY HEADING 270` |
+| `QS LT <hdg> <callsign> /U` / `QS RT <hdg> …` | type it | `TURN LEFT HEADING` / `TURN RIGHT HEADING` | `QS LT 090 DAL123 /U` |
+| `QS PH <callsign> /U` | type it | `FLY PRESENT HEADING` | `QS PH DAL123 /U` |
+| `QS /<kt> <callsign> /U` | type it | `MAINTAIN <kt>KT` (80–400 kt) | `QS /280 DAL123 /U` → `MAINTAIN 280KT` |
+
+**Altitudes:** `350`, `FL350` or `35000`, from FL010 to FL600. Below FL180 the pilot gets feet
+(`QZ 80 DAL123 /U` → `CLIMB AND MAINTAIN 8,000ft`). `QQ` also takes ERAM's interim prefixes (`QQ R110 …`).
+VFR, OTP and block altitudes (`240B260`) are not sent.
+
+**Modifiers:** add them before or after `/U`, for example `QZ 350 DAL123 /PD /U`.
+
+| Modifier | Adds to the message | Applies to |
+|---|---|---|
+| `/PD` | `AT PILOTS DISCRETION` | Altitude, direct |
+| `/IMM` | `IMMEDIATELY` | All |
+| `/EXP` | `EXPEDITE` | All |
+| `/TFC` | `DUE TO TRAFFIC` | All |
+| `/WX` | `DUE TO WEATHER` | All |
+| `/RES` | `DUE TO RESTRICTED AIRSPACE` | All |
+
+Put `/U` and the modifiers **at the end of the line**. That's how the app knows what to erase before CRC gets it.
+Modifiers in the middle still reach the EDST, but CRC gets them too and answers `MESSAGE TOO LONG`.
+
+**What has to be true:** you're signed in and verified in the EDST, and the aircraft is logged on to CPDLC. Otherwise
+the EDST rejects the command and nothing is sent. The top bar shows why in red: `NOT AUTH` (not signed in or verified),
+`NO CPDLC` (aircraft not logged on), `NO TRACK` (callsign not found), `ILL ALT` / `ILL HDG` / `ILL SPD` / `NO FIX`
+(the value couldn't be read).
+
+Only `QZ` has a no-`/U` form (the [altitude amendment](#altitude-amendment-nothing-is-sent) above). `QQ`, `QU` and `QS`
+without `/U` are rejected by the EDST with `REQUIRE /U`, and CRC handles them as normal.
 
 ### What isn't mirrored
 
