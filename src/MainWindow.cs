@@ -78,6 +78,11 @@ namespace VusaLinkApp
 
             sync.Enabled = cfg.Mirror;
             sync.TrimForCrc = CrcForward.CrcTrimLength;
+            // Log what happens on Enter in CRC. Only EDST commands are written out; anything else (chat etc.)
+            // is logged as its length only.
+            sync.Diagnose = (raw, erase) => Log.Info(CrcForward.Gate(raw) != null
+                ? "CRC Enter: [" + raw + "] erase=" + erase
+                : "CRC Enter: non-EDST line (" + raw.Trim().Length + " chars)");
             var crcProc = Environment.GetEnvironmentVariable("VUSALINK_CRC_PROCESS");
             if (!string.IsNullOrEmpty(crcProc)) sync.ProcessName = crcProc;
             sync.CommandSkipped += cmd => Dispatcher.BeginInvoke(new Action(() =>

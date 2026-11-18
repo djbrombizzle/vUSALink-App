@@ -21,6 +21,7 @@ namespace VusaLinkApp
         public bool Enabled = true;
         public string ProcessName = "CRC";      // VUSALINK_CRC_PROCESS can point this at a stand-in for testing
         public Func<string, int> TrimForCrc;    // characters to erase before CRC gets the line (0 = none)
+        public Action<string, int> Diagnose;    // every Enter in CRC (raw line, chars to erase): for the log
 
         readonly StringBuilder buffer = new StringBuilder();
         readonly LowLevelKeyboardProc proc;
@@ -29,6 +30,7 @@ namespace VusaLinkApp
         IntPtr lastHwnd = IntPtr.Zero;
         bool lastWasCrc;
         bool dirty;   // the buffer may not match CRC's MCA (cursor moved, text recalled, ...)
+        bool holdEnterUp; // the Enter press was held back, so hold back its release as well
 
         static readonly IntPtr Marker = (IntPtr)0x56555341; // "VUSA": tags keystrokes this app injects
 
@@ -74,6 +76,7 @@ namespace VusaLinkApp
             }
             catch { }
             Reset();
+            if (lastWasCrc) Log.Info("CRC sync: CRC window focused (hwnd " + hwnd + ")");
             return lastWasCrc;
         }
 
@@ -81,10 +84,13 @@ namespace VusaLinkApp
         {
             try
             {
-                if (nCode >= 0 && Enabled && (wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN)
-                    && Marshal.ReadIntPtr(lParam, 16) != Marker && CrcInForeground())
+                if (nCode >= 0 && Enabled && Marshal.ReadIntPtr(lParam, 16) != Marker)
                 {
-                    if (OnKey(Marshal.ReadInt32(lParam))) return (IntPtr)1;   // Enter held back; re-sent below
+                    int vk = Marshal.ReadInt32(lParam);
+                    bool down = wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
+                    bool up = wParam == (IntPtr)WM_KEYUP || wParam == (IntPtr)WM_SYSKEYUP;
+                    if (up && vk == 0x0D && holdEnterUp) { holdEnterUp = false; return (IntPtr)1; }  // its release too
+                    if (down && CrcInForeground() && OnKey(vk)) { holdEnterUp = true; return (IntPtr)1; } // Enter held back; re-sent below
                 }
             }
             catch { }
@@ -126,6 +132,7 @@ namespace VusaLinkApp
                     return false;
                 }
                 int erase = TrimForCrc != null ? TrimForCrc(raw) : 0;
+                if (Diagnose != null) Diagnose(raw, erase);
                 if (CommandEntered != null) CommandEntered(cmd);
                 if (erase > 0)
                 {
@@ -160,7 +167,7 @@ namespace VusaLinkApp
             };
         }
 
-        const int WH_KEYBOARD_LL = 13, WM_KEYDOWN = 0x100, WM_SYSKEYDOWN = 0x104;
+        const int WH_KEYBOARD_LL = 13, WM_KEYDOWN = 0x100, WM_KEYUP = 0x101, WM_SYSKEYDOWN = 0x104, WM_SYSKEYUP = 0x105;
         const uint INPUT_KEYBOARD = 1, KEYEVENTF_KEYUP = 2;
         delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
