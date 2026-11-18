@@ -34,6 +34,10 @@ namespace VusaLinkApp
 
         static readonly IntPtr Marker = (IntPtr)0x56555341; // "VUSA": tags keystrokes this app injects
 
+        // CRC ERAM function-key command prefixes, F1..F9 (same map CRC Companion uses).
+        static readonly string[] FKeys = { "QF ", "QP ", "QT ", "QX ", "QZ ", "QU ", "QL ", "QQ ", "QB " };
+        static readonly string[] ShiftFKeys = { "DM ", "QD ", null, null, null, null, "WR ", "QR ", null };
+
         public CrcSync()
         {
             proc = HookProc; // keep the delegate alive for the lifetime of the hook
@@ -103,6 +107,14 @@ namespace VusaLinkApp
             bool shift = (GetKeyState(0x10) & 0x8000) != 0;
             bool ctrl = (GetKeyState(0x11) & 0x8000) != 0;
             if (ctrl) { dirty = true; return false; }                         // e.g. Ctrl+R recalls a command in CRC
+            // CRC's ERAM function keys replace the MCA line with a command prefix (F5 -> "QZ ", F6 -> "QU ", ...).
+            if (vk >= 0x70 && vk <= 0x78)
+            {
+                var pre = shift ? ShiftFKeys[vk - 0x70] : FKeys[vk - 0x70];
+                if (pre != null) { buffer.Clear(); buffer.Append(pre); dirty = false; }
+                else dirty = true;   // unknown key: CRC may have changed the line
+                return false;
+            }
             if (vk >= 0x41 && vk <= 0x5A) buffer.Append((char)vk);
             else if (vk >= 0x30 && vk <= 0x39 && !shift) buffer.Append((char)vk);
             else if (vk >= 0x60 && vk <= 0x69) buffer.Append((char)('0' + vk - 0x60));
