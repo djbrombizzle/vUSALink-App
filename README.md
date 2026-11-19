@@ -127,7 +127,12 @@ SKW5646. CRC keeps its own line with the CID.
   On a test server (flights not on VATSIM) pairs are kept unverified; the EDST still checks the callsign exists.
 - **Unknown CID:** a `/U` uplink with a CID the app hasn't learned sends nothing, and the top bar says
   `CID 151 NOT KNOWN - QF IT IN CRC FIRST`. Other lines with unknown CIDs (such as routine handoffs) are skipped quietly.
-- **Freshness:** a new QF replaces older pairs for that CID or callsign. Pairs expire after 4 hours.
+- **How long a pair lasts:** a CRC CID belongs to one pilot connection under one callsign, so the app keeps a pair
+  for as long as that connection is on VATSIM, even across app restarts. It is saved in
+  `%LOCALAPPDATA%\vUSALinkApp\cids.json`. A pair is dropped when the pilot reconnects (VATSIM logon time changes) or has
+  been gone from VATSIM for 3 minutes; the app checks every 30 seconds. QF the aircraft again after a reconnect. On a
+  test server (flights not on VATSIM) pairs are kept for 12 hours. A newer QF always replaces older pairs for that
+  CID or callsign.
 
 ### What isn't mirrored
 

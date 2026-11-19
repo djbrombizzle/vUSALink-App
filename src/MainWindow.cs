@@ -105,7 +105,13 @@ namespace VusaLinkApp
             crcTimer.Tick += (s, e) => UpdateCrcState();
             crcTimer.Start();
             UpdateCrcState();
+            // A learned CID lasts for that pilot connection; every 30 s drop pairs whose connection ended or changed.
+            cidTimer.Tick += (s, e) => { if (cids.Count > 0) Task.Run(() => cids.Maintain()); };
+            cidTimer.Start();
+            Task.Run(() => cids.Maintain());
         }
+
+        readonly DispatcherTimer cidTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
 
         // ---------------------------------------------------------------- strip (top bar)
 
@@ -200,9 +206,9 @@ namespace VusaLinkApp
             bool running = Process.GetProcessesByName("CRC").Length > 0;
             crcState.Text = running ? "CRC ●" : "CRC ○";
             crcState.Foreground = running ? Theme.Green : Theme.Dim;
-            crcState.ToolTip = running
+            crcState.ToolTip = (running
                 ? (cfg.Mirror ? "CRC is running - /U uplink commands typed in CRC are forwarded" : "CRC is running - mirroring is off")
-                : "CRC is not running";
+                : "CRC is not running") + " · " + cids.Count + " CID(s) learned from QF";
         }
 
         // ---------------------------------------------------------------- WebView2

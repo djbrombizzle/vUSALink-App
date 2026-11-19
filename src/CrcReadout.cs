@@ -172,27 +172,112 @@ namespace VusaLinkApp
 
     // CID -> callsign pairs learned from QF readouts. Each readout is checked against the VATSIM data feed
     // before it is trusted, because one misread character could otherwise pair a CID with the wrong aircraft.
+    //
+    // A CRC CID belongs to one pilot connection under one callsign: it stays the same for that connection and
+    // changes when the pilot reconnects. So a pair is kept (and saved to disk, surviving an app restart) only
+    // while that same connection is on VATSIM: it is dropped as soon as the callsign's VATSIM logon time changes
+    // (a reconnect) or the callsign has been gone for 3 minutes (disconnected). Flights that aren't on VATSIM
+    // (test servers) can't be tracked that way and are kept for 12 hours. A newer QF replaces older pairs.
     class CidBook
     {
-        public class Entry { public string Callsign, Sector; public bool Verified; public DateTime At; }
+        public class Entry { public string Callsign, Sector, Logon; public bool Verified; public DateTime At, LastSeen; }
 
         readonly Dictionary<string, Entry> byCid = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
         readonly object sync = new object();
         Dictionary<string, Pilot> feed = new Dictionary<string, Pilot>(StringComparer.OrdinalIgnoreCase);
         DateTime feedAt = DateTime.MinValue;
-        static readonly TimeSpan Ttl = TimeSpan.FromHours(4);
+        static readonly TimeSpan GoneFor = TimeSpan.FromMinutes(3), UnverifiedTtl = TimeSpan.FromHours(12);
+        static string FilePath { get { return Path.Combine(Settings.Dir, "cids.json"); } }
 
-        class Pilot { public string Type, Squawk, AssignedSquawk; }
+        class Pilot { public string Type, Squawk, AssignedSquawk, Logon; }
+
+        public CidBook() { Load(); }
+
+        public int Count { get { lock (sync) return byCid.Count; } }
 
         public Entry Find(string cid)
         {
             lock (sync)
             {
                 Entry e;
-                if (cid == null || !byCid.TryGetValue(cid, out e)) return null;
-                if (DateTime.UtcNow - e.At > Ttl) { byCid.Remove(cid); return null; }
-                return e;
+                return cid != null && byCid.TryGetValue(cid, out e) ? e : null;
             }
+        }
+
+        // Called every 30 s off the UI thread: drops pairs whose pilot connection has ended or been replaced.
+        public void Maintain()
+        {
+            RefreshFeed();
+            bool changed = false;
+            lock (sync)
+            {
+                var now = DateTime.UtcNow;
+                foreach (var kv in byCid.ToList())
+                {
+                    var e = kv.Value;
+                    Pilot p;
+                    string why = null;
+                    if (feed.Count > 0 && feed.TryGetValue(e.Callsign, out p))
+                    {
+                        if (e.Logon != null && p.Logon != null && p.Logon != e.Logon) why = "pilot reconnected";
+                        else { e.LastSeen = now; changed = true; }
+                    }
+                    else if (e.Verified ? now - e.LastSeen > GoneFor : now - e.At > UnverifiedTtl) why = "pilot disconnected";
+                    if (why != null) { byCid.Remove(kv.Key); changed = true; Log.Info("CID " + kv.Key + " = " + e.Callsign + " dropped (" + why + ")"); }
+                }
+            }
+            if (changed) Save();
+        }
+
+        void Load()
+        {
+            try
+            {
+                if (!File.Exists(FilePath)) return;
+                var arr = Json.Parse(File.ReadAllText(FilePath)) as List<object>;
+                if (arr == null) return;
+                lock (sync)
+                    foreach (var o in arr)
+                    {
+                        var cid = Json.Str(o, "cid"); var cs = Json.Str(o, "callsign");
+                        if (string.IsNullOrEmpty(cid) || string.IsNullOrEmpty(cs)) continue;
+                        byCid[cid] = new Entry
+                        {
+                            Callsign = cs, Sector = Json.Str(o, "sector") ?? "", Logon = Json.Str(o, "logon"),
+                            Verified = Json.Bool(o, "verified") == true,
+                            At = ParseTime(Json.Str(o, "at")), LastSeen = ParseTime(Json.Str(o, "lastSeen"))
+                        };
+                    }
+                Log.Info("CID book: " + byCid.Count + " pair(s) loaded");
+            }
+            catch (Exception ex) { Log.Info("CID book load failed: " + ex.Message); }
+        }
+
+        void Save()
+        {
+            try
+            {
+                List<object> arr;
+                lock (sync)
+                    arr = byCid.Select(kv => (object)new Dictionary<string, object>
+                    {
+                        { "cid", kv.Key }, { "callsign", kv.Value.Callsign }, { "sector", kv.Value.Sector },
+                        { "logon", kv.Value.Logon },
+                        { "verified", kv.Value.Verified },
+                        { "at", kv.Value.At.ToString("o", CultureInfo.InvariantCulture) },
+                        { "lastSeen", kv.Value.LastSeen.ToString("o", CultureInfo.InvariantCulture) }
+                    }).ToList();
+                Directory.CreateDirectory(Settings.Dir);
+                File.WriteAllText(FilePath, Json.Write(arr));
+            }
+            catch (Exception ex) { Log.Info("CID book save failed: " + ex.Message); }
+        }
+
+        static DateTime ParseTime(string s)
+        {
+            DateTime t;
+            return DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out t)
+                ? t.ToUniversalTime() : DateTime.UtcNow;
         }
 
         // Returns a description of what was learned, or null if the readout was rejected (reason in 'why').
@@ -220,7 +305,12 @@ namespace VusaLinkApp
                 else if (fixes.Count > 1) { why = "ambiguous callsign " + cs; return null; }
                 // Not on VATSIM at all (e.g. a test server): keep it unverified. The EDST still checks the callsign.
             }
-            var e = new Entry { Callsign = cs, Sector = r.Sector, Verified = verified, At = DateTime.UtcNow };
+            Pilot conn;
+            var e = new Entry
+            {
+                Callsign = cs, Sector = r.Sector, Verified = verified, At = DateTime.UtcNow, LastSeen = DateTime.UtcNow,
+                Logon = verified && f.TryGetValue(cs, out conn) ? conn.Logon : null   // this pilot connection
+            };
             lock (sync)
             {
                 // One CID per callsign: a new QF readout replaces older pairs for either side.
@@ -228,6 +318,7 @@ namespace VusaLinkApp
                     byCid.Remove(k);
                 byCid[r.Cid] = e;
             }
+            Save();
             return e;
         }
 
@@ -270,6 +361,7 @@ namespace VusaLinkApp
                         var fp = Json.Obj(o, "flight_plan");
                         d[cs] = new Pilot
                         {
+                            Logon = Json.Str(o, "logon_time"),
                             Squawk = Json.Str(o, "transponder"),
                             Type = fp != null ? Json.Str(fp, "aircraft_short") : null,
                             AssignedSquawk = fp != null ? Json.Str(fp, "assigned_transponder") : null
