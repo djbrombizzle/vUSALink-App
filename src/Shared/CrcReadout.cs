@@ -187,7 +187,7 @@ namespace VusaLinkApp
         Dictionary<string, Pilot> feed = new Dictionary<string, Pilot>(StringComparer.OrdinalIgnoreCase);
         DateTime feedAt = DateTime.MinValue;
         static readonly TimeSpan GoneFor = TimeSpan.FromMinutes(3), UnverifiedTtl = TimeSpan.FromHours(12);
-        static string FilePath { get { return Path.Combine(Settings.Dir, "cids.json"); } }
+        static string FilePath { get { return Path.Combine(AppPaths.Dir, "cids.json"); } }
 
         class Pilot { public string Type, Squawk, AssignedSquawk, Logon; }
 
@@ -280,7 +280,7 @@ namespace VusaLinkApp
                         { "at", kv.Value.At.ToString("o", CultureInfo.InvariantCulture) },
                         { "lastSeen", kv.Value.LastSeen.ToString("o", CultureInfo.InvariantCulture) }
                     }).ToList();
-                Directory.CreateDirectory(Settings.Dir);
+                Directory.CreateDirectory(AppPaths.Dir);
                 File.WriteAllText(FilePath, Json.Write(arr));
             }
             catch (Exception ex) { Log.Info("CID book save failed: " + ex.Message); }

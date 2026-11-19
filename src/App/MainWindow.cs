@@ -104,7 +104,17 @@ namespace VusaLinkApp
                 last.ToolTip = "Cursor keys, Delete or a Ctrl shortcut were used, so the app can't be sure what CRC's MCA held";
             }));
             sync.CommandEntered += cmd => Dispatcher.BeginInvoke(new Action(() => OnCrcCommand(cmd)));
-            sync.Start();
+            if (CrcMirrorLock.TryAcquire()) sync.Start();
+            else
+            {
+                // vUSALink-Lite is already watching CRC; two watchers would trim CRC's line twice.
+                Log.Info("CRC mirroring is already running in another vUSALink program; off here");
+                Loaded += (s, e) =>
+                {
+                    last.Text = "CRC MIRRORING IS RUNNING IN vUSALink-Lite - OFF IN THIS WINDOW";
+                    last.Foreground = Theme.Amber;
+                };
+            }
             crcTimer.Tick += (s, e) => UpdateCrcState();
             crcTimer.Start();
             UpdateCrcState();

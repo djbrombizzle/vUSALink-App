@@ -1,5 +1,5 @@
-# Builds vUSALink App on every push / pull request.
-# Pushing a version tag (e.g. v0.2.0) also publishes a GitHub Release with the ready-to-run zip.
+# Builds vUSALink App and vUSALink-Lite on every push / pull request.
+# Pushing a version tag (e.g. v0.4.0) also publishes a GitHub Release with both ready-to-run zips.
 name: Build
 
 on:
@@ -26,20 +26,29 @@ jobs:
         shell: pwsh
         run: |
           $v = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { 'dev-' + $env:GITHUB_SHA.Substring(0, 7) }
-          $pkg = "vUSALink-App-$v"
-          New-Item -ItemType Directory $pkg | Out-Null
-          Copy-Item bin/vUSALinkApp.exe, bin/*.dll, README.md, LICENSE, lib/WebView2-LICENSE.txt $pkg
-          Compress-Archive -Path "$pkg/*" -DestinationPath "$pkg.zip"
-          "PKG=$pkg" >> $env:GITHUB_ENV
+          # vUSALink App: the EDST in its own window (needs the WebView2 DLLs next to it)
+          $app = "vUSALink-App-$v"
+          New-Item -ItemType Directory $app | Out-Null
+          Copy-Item bin/vUSALinkApp.exe, bin/*.dll, README.md, LICENSE, lib/WebView2-LICENSE.txt $app
+          Compress-Archive -Path "$app/*" -DestinationPath "$app.zip"
+          # vUSALink-Lite: tray helper for the EDST in a CRC browser tab (one exe)
+          $lite = "vUSALink-Lite-$v"
+          New-Item -ItemType Directory $lite | Out-Null
+          Copy-Item bin/vUSALinkLite.exe, README.md, LICENSE $lite
+          Compress-Archive -Path "$lite/*" -DestinationPath "$lite.zip"
+          "APP=$app" >> $env:GITHUB_ENV
+          "LITE=$lite" >> $env:GITHUB_ENV
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PKG }}
-          path: ${{ env.PKG }}.zip
+          name: vUSALink-${{ github.sha }}
+          path: |
+            ${{ env.APP }}.zip
+            ${{ env.LITE }}.zip
 
       - name: Publish release
         if: github.ref_type == 'tag'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME "$env:PKG.zip" --title "vUSALink App $env:GITHUB_REF_NAME" --generate-notes
+        run: gh release create $env:GITHUB_REF_NAME "$env:APP.zip" "$env:LITE.zip" --title "vUSALink App $env:GITHUB_REF_NAME" --generate-notes

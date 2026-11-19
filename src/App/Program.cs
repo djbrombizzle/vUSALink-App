@@ -21,20 +21,4 @@ namespace VusaLinkApp
             app.Run(new MainWindow(args.Length > 0 ? args[0] : null));
         }
     }
-
-    static class Log
-    {
-        static readonly object Sync = new object();
-
-        public static void Info(string s)
-        {
-            try
-            {
-                lock (Sync)
-                    File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "vUSALinkApp.log"),
-                        DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " " + s + Environment.NewLine);
-            }
-            catch { }
-        }
-    }
 }

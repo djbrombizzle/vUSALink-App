@@ -10,8 +10,7 @@ namespace VusaLinkApp
     // The EDST page keeps its own settings (sign-in, layout, filters) in the WebView2 profile next to it.
     class Settings
     {
-        public static readonly string Dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "vUSALinkApp");
+        public static readonly string Dir = AppPaths.Dir;
         static string FilePath { get { return Path.Combine(Dir, "settings.ini"); } }
 
         public const string DefaultUrl = "https://vatflow.io/vusalink/edst/";

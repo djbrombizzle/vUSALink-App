@@ -1,6 +1,7 @@
-# vUSALink App
+# vUSALink App and vUSALink-Lite
 
-A Windows desktop app for the **vUSAlink EDST** that runs next to **CRC**. It shows the EDST from VATFLOW
+A Windows desktop app for the **vUSAlink EDST** that runs next to **CRC**. **vUSALink-Lite** is the same CRC link
+without the window, for controllers who keep the EDST in a CRC browser tab (see [Two ways to use it](#two-ways-to-use-it)). It shows the EDST from VATFLOW
 (`https://vatflow.io/vusalink/edst/`) in its own window and connects it to CRC. You can amend an altitude or send a
 CPDLC uplink by typing the command in CRC, without typing it again in the EDST.
 
@@ -12,7 +13,36 @@ what a command means, amendments, menus and the refresh rate. The app adds only 
 it passes on what you type in CRC, keeps the window on top, remembers your sign-in and opens pop-ups as windows.
 It talks to the page through one small, stable host API (see [How the app talks to the EDST](#how-the-app-talks-to-the-edst)).
 
-## Download
+## Two ways to use it
+
+| | **vUSALink App** | **vUSALink-Lite** |
+|---|---|---|
+| Where the EDST is | In the app's own window | In a **CRC browser tab** (or any browser) |
+| What you download | `vUSALink-App-vX.Y.Z.zip` (exe + 3 DLLs) | `vUSALink-Lite-vX.Y.Z.zip` (one small exe) |
+| Runs as | A window | An icon in the system tray, no window |
+| CRC mirroring, `/U` trim, UC, handoffs, CIDs from QF | Yes | Yes, the same code |
+
+Use one or the other. If both are running, only the first one started watches CRC, so a command is never handled twice.
+
+## vUSALink-Lite (EDST in a CRC tab)
+
+1. Download `vUSALink-Lite-vX.Y.Z.zip` from [Releases](../../releases), unzip it anywhere and run `vUSALinkLite.exe`.
+   A teal **L** appears in the system tray. Right-click it (or left-click) for the menu, where you can tick
+   **Start with Windows** so it's always there.
+2. Open the EDST in a CRC browser tab as usual (`https://vatflow.io/vusalink/edst/?crc=1`) and sign in.
+3. The EDST toolbar shows **LINK** (teal) when it's connected to Lite. Commands you type in CRC now reach the EDST
+   exactly as they do with the app. Results show in the EDST's MCA. If an uplink typed in CRC isn't sent, Lite also
+   shows a Windows notification.
+
+How it connects: Lite listens on `localhost` port 47613 on your PC only (never the network), and only accepts the
+vatflow EDST pages. Lite only trims `/U` or clears a UC line in CRC while an EDST page is connected, so a command is
+never silently lost when nothing can send it. Without Lite, the EDST in a CRC tab works exactly as before.
+
+The tray menu shows whether CRC is running and the EDST is connected, plus the last command and the CIDs learned.
+It also has **CRC mirroring** on/off, **Start with Windows**, **Open EDST in browser**, **Show log** and **Exit**.
+The log is `vUSALinkLite.log` next to the exe.
+
+## Download (vUSALink App)
 
 1. Download the latest `vUSALink-App-vX.Y.Z.zip` from [Releases](../../releases).
 2. Unzip it anywhere (for example `Documents\vUSALink App`). Keep the `.exe` and the three `.dll` files together.
