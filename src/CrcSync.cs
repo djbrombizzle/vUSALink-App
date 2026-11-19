@@ -176,6 +176,14 @@ namespace VusaLinkApp
                     Log.Info("CRC line trimmed by " + erase + " chars before Enter: " + cmd);
                     return true;
                 }
+                if (erase < 0)
+                {
+                    // A command only the EDST knows (UC): clear CRC's line instead of letting CRC reject it.
+                    int all = raw.Length;
+                    dispatcher.BeginInvoke(new Action(() => SendKeys(0x08, all, false)));
+                    Log.Info("CRC line cleared (EDST-only command): " + cmd);
+                    return true;
+                }
                 return false;
             }
             if (buffer.Length > 200) Reset();

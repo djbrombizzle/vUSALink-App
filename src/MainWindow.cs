@@ -82,7 +82,9 @@ namespace VusaLinkApp
             PreviewKeyDown += OnKey;
 
             sync.Enabled = cfg.Mirror;
-            sync.TrimForCrc = CrcForward.CrcTrimLength;
+            // /U is trimmed off before CRC gets the line; a UC line (CRC has no UC) is cleared from CRC entirely,
+            // but only when the loaded EDST takes UC (host API v2), so a line never just disappears.
+            sync.TrimForCrc = raw => CrcForward.CrcTrimLength(raw, ready && apiVersion >= 2 && cfg.Mirror);
             // Log what happens on Enter in CRC. Only EDST commands are written out; anything else (chat etc.)
             // is logged as its length only.
             sync.Diagnose = (raw, erase) => Log.Info(CrcForward.Gate(raw) != null || CrcForward.Handoff(raw) != null
@@ -462,8 +464,7 @@ namespace VusaLinkApp
             if (resolved == null)
             {
                 Log.Info("CID " + unknownCid + " not known: " + raw.Trim());
-                if (raw.Contains("/")
-                    && (raw.ToUpperInvariant().Contains("/U") && CrcForward.Gate(raw) != null))
+                if (CrcForward.IsUplinkLine(raw))
                 {
                     last.Text = "✗ CID " + unknownCid + " NOT KNOWN - QF IT IN CRC FIRST (NOTHING SENT)";
                     last.Foreground = Theme.Red;
@@ -474,6 +475,7 @@ namespace VusaLinkApp
             // v2 pages also take ERAM handoffs ("11 AAL004") and mark CPDLC aircraft for a one-click CONTACT.
             var cmd = CrcForward.Gate(resolved) ?? (apiVersion >= 2 ? CrcForward.Handoff(resolved) : null);
             if (cmd == null || !ready) return;
+            if (CrcForward.IsUc(cmd) && apiVersion < 2) return;   // older EDST pages don't know UC
             if (cid != null) Log.Info("CID " + cid + " -> " + cmd);
             var js =
                 "(function(c){var post=function(o){o.t='host';o.cmd=c;window.chrome.webview.postMessage(JSON.stringify(o));};" +

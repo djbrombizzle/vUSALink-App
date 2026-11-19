@@ -93,6 +93,27 @@ the EDST rejects the command and nothing is sent. The top bar shows why in red: 
 Only `QZ` has a no-`/U` form (the [altitude amendment](#altitude-amendment-nothing-is-sent) above). `QQ`, `QU` and `QS`
 without `/U` are rejected by the EDST with `REQUIRE /U`, and CRC handles them as normal.
 
+### Crossing restrictions: `UC`
+
+ERAM's crossing restriction uplink. Type it in CRC's MCA like any command. `UC` is itself the uplink, so no `/U` is
+needed. CRC has no `UC` command, so when you press Enter **the app clears the line from CRC's MCA** (CRC never sees it
+and shows no error) and the EDST sends it.
+
+| Command | What the pilot receives | ACL |
+|---|---|---|
+| `UC VUH A100 AAL002` | `CROSS VUH AT AND MAINTAIN 10,000ft`, plus the destination altimeter below FL180 | Coded under the altitude |
+| `UC FAY A240 AWE228` | `CROSS FAY AT AND MAINTAIN FL240` | Coded under the altitude |
+| `UC VUH S250 AAL002` | `CROSS VUH AT 250KT` | Coded under the speed |
+| `UC APRIL M.80 NASA242` | `CROSS APRIL AT M.80` | Coded under the speed |
+| `UC STV A100 AAL002/UAL262/AWE121` | One uplink to each aircraft | Each row |
+
+- **Position:** a fix, navaid or fix-radial-distance (`AUS030015`).
+- **Reasons:** `/TFC`, `/WX` and `/RES` add `DUE TO …` (`UC FAY A240 /TFC AWE228`).
+- **CIDs** work in place of callsigns once learned from a QF, including in a `/`-separated list.
+- **Same checks** as other uplinks: signed in and verified, aircraft on CPDLC. Otherwise the EDST rejects it and nothing
+  is sent.
+- **Requires** the EDST page with host API version 2. With an older page the app leaves UC lines alone in CRC.
+
 ### Handoffs: one-click CPDLC frequency change
 
 When you start a handoff in CRC by typing the sector and the callsign (`11 AAL004`), CRC handles it as usual and the

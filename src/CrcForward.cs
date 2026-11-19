@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 
@@ -13,7 +14,8 @@ namespace VusaLinkApp
     // Uplink() / Amend(): legacy rules for EDST pages from before the host API. Remove after one release.
     static class CrcForward
     {
-        static readonly string[] UplinkVerbs = { "QZ", "QQ", "QU", "QS" };
+        // UC = ERAM crossing restriction uplink (host API v2 pages). CRC itself has no UC command.
+        static readonly string[] UplinkVerbs = { "QZ", "QQ", "QU", "QS", "UC" };
 
         public static string Gate(string raw)
         {
@@ -22,9 +24,24 @@ namespace VusaLinkApp
             return toks.Length >= 2 && Array.IndexOf(UplinkVerbs, toks[0]) >= 0 ? text : null;
         }
 
-        // CRC CIDs: in an EDST command or handoff, the FLID may be a CRC CID ("QZ 240 151 /U", "11 151").
-        // Known CIDs (learned from QF readouts) are swapped for the callsign. The FLID position is the last
-        // non-modifier token, and never the first argument of QZ/QQ/QU/QS (that's the altitude/fix/heading).
+        public static bool IsUc(string raw)
+        {
+            string text;
+            return Tokens(raw, out text)[0] == "UC";
+        }
+
+        // A line that sends CPDLC as soon as it's entered: UC, or any EDST verb with /U.
+        public static bool IsUplinkLine(string raw)
+        {
+            string text;
+            var toks = Tokens(raw, out text);
+            return Gate(raw) != null && (toks[0] == "UC" || HasUplink(toks));
+        }
+
+        // CRC CIDs: in an EDST command or handoff, the FLID may be a CRC CID ("QZ 240 151 /U", "11 151",
+        // "UC VUH A100 151/152"). Known CIDs (learned from QF readouts) are swapped for the callsign. The FLID is
+        // the last non-modifier token, and never one of the command's own arguments: the altitude/fix/heading of
+        // QZ/QQ/QU/QS (2nd word), or the position and restriction of UC (2nd and 3rd words).
         // Returns the text to send, or null with 'unknownCid' set when a CID isn't known (nothing is sent).
         static readonly Regex CidLike = new Regex(@"^[0-9A-Z]{3}$");
 
@@ -36,20 +53,27 @@ namespace VusaLinkApp
             int idx = -1;
             if (toks.Length >= 3 && Array.IndexOf(UplinkVerbs, toks[0]) >= 0)
             {
-                for (int i = toks.Length - 1; i >= 2; i--) if (!toks[i].StartsWith("/")) { idx = i; break; }
+                int first = toks[0] == "UC" ? 3 : 2;
+                for (int i = toks.Length - 1; i >= first; i--) if (!toks[i].StartsWith("/")) { idx = i; break; }
             }
             else if (toks.Length == 2 && Regex.IsMatch(toks[0], @"^(\d{1,2}|[A-Z]\d{1,2}|[A-Z])$")) idx = 1;
-            if (idx < 0 || !CidLike.IsMatch(toks[idx]) || !toks[idx].Any(char.IsDigit)) return text;
-            var cs = lookup(toks[idx]);
-            if (cs != null)
+            if (idx < 0) return text;
+            var parts = toks[idx].Split('/');
+            var swapped = new List<string>();
+            for (int p = 0; p < parts.Length; p++)
             {
-                cid = toks[idx];
-                toks[idx] = cs;
-                return string.Join(" ", toks);
+                var t = parts[p];
+                if (!CidLike.IsMatch(t) || !t.Any(char.IsDigit)) continue;
+                var cs = lookup(t);
+                if (cs != null) { swapped.Add(t); parts[p] = cs; }
+                // Starts with a digit: can't be a callsign, so it's a CID we haven't seen a QF for.
+                else if (char.IsDigit(t[0])) { unknownCid = t; return null; }
+                // "A12"-style: treat as a short callsign
             }
-            // Starts with a digit: can't be a callsign, so it's a CID we haven't seen a QF for.
-            if (char.IsDigit(toks[idx][0])) { unknownCid = toks[idx]; return null; }
-            return text;   // "A12"-style: treat as a short callsign
+            if (swapped.Count == 0) return text;
+            cid = string.Join("/", swapped);
+            toks[idx] = string.Join("/", parts);
+            return string.Join(" ", toks);
         }
 
         // ERAM handoff "<sector> <FLID>" (e.g. "11 AAL004"), same rule as the EDST page (host API v2).
@@ -70,9 +94,12 @@ namespace VusaLinkApp
 
         // How many characters to erase from the end of CRC's MCA line before CRC gets it: the trailing EDST
         // modifiers, when they include /U. "QZ 240 DAL123 /PD /U" -> 8, leaving "QZ 240 DAL123" for CRC.
-        public static int CrcTrimLength(string raw)
+        // -1 = erase the whole line and don't press Enter (UC: CRC has no such command), only when the EDST
+        // page can take UC (ucAccepted), so a line never just disappears.
+        public static int CrcTrimLength(string raw, bool ucAccepted)
         {
             if (Gate(raw) == null) return 0;
+            if (IsUc(raw)) return ucAccepted ? -1 : 0;
             var m = TrailingMods.Match(raw ?? "");
             if (!m.Success || m.Index == 0) return 0;
             var mods = m.Value.Split(new[] { ' ', '\t', '/' }, StringSplitOptions.RemoveEmptyEntries)
