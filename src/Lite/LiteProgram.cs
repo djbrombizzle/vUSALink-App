@@ -16,7 +16,7 @@ namespace VusaLinkApp
     // the EDST page open in a CRC browser tab (or any browser) over a local link (see LinkServer).
     static class LiteProgram
     {
-        public const string Version = "0.4.0";
+        public const string Version = "0.3.1";
 
         [STAThread]
         static void Main()
