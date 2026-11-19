@@ -92,6 +92,7 @@ namespace VusaLinkApp
             var crcProc = Environment.GetEnvironmentVariable("VUSALINK_CRC_PROCESS");
             if (!string.IsNullOrEmpty(crcProc)) sync.ProcessName = CrcScreen.ProcessName = crcProc;
             sync.ReadoutLikely += () => ReadQfSoon(++readGen, 400, true);
+            cids.Changed += () => Dispatcher.BeginInvoke(new Action(PushCids));
             sync.CommandSkipped += cmd => Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (CrcForward.Gate(cmd) == null) return;
@@ -271,6 +272,7 @@ namespace VusaLinkApp
             {
                 SetStatus(Short(core.Source), Theme.Dim);
                 apiVersion = await DetectHostApi();
+                if (apiVersion >= 2) PushCids();
                 if (apiVersion < 1)
                 {
                     // Older EDST page without the host API: patch it the old way (remove after one release).
@@ -511,6 +513,21 @@ namespace VusaLinkApp
             last.Foreground = Theme.Teal;
             last.ToolTip = "Learned from CRC's QF readout: you can now use " + top.Item1.Cid + " in place of " + top.Item2.Callsign +
                 ". (" + top.Item2.Sector + ") is the sector that owns the track." + (top.Item2.Verified ? "" : " Not found on VATSIM, so not cross-checked.");
+        }
+
+        // Shows learned CIDs in the EDST: CID left of the callsign, and "(sector)" after it when another
+        // sector owns the track (host API v2 setCids; the page decides what to show).
+        async void PushCids()
+        {
+            if (!ready || apiVersion < 2) return;
+            try
+            {
+                var r = await web.CoreWebView2.ExecuteScriptAsync(
+                    "(function(m){return window.vUSALinkEDST&&vUSALinkEDST.setCids?vUSALinkEDST.setCids(m):-1;})(" +
+                    Json.Write(cids.ForEdst()) + ")");
+                Log.Info("CIDs sent to EDST: " + r);
+            }
+            catch (Exception ex) { Log.Info("CID push failed: " + ex.Message); }
         }
 
         List<Tuple<QfReadout, CidBook.Entry, string>> ReadQf()

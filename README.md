@@ -127,6 +127,9 @@ SKW5646. CRC keeps its own line with the CID.
   On a test server (flights not on VATSIM) pairs are kept unverified; the EDST still checks the callsign exists.
 - **Unknown CID:** a `/U` uplink with a CID the app hasn't learned sends nothing, and the top bar says
   `CID 151 NOT KNOWN - QF IT IN CRC FIRST`. Other lines with unknown CIDs (such as routine handoffs) are skipped quietly.
+- **Shown in the EDST:** learned CIDs appear in the Aircraft List left of the callsign (`266 UAL1123`). When another
+  sector owns the track, its number follows the callsign (`266 UAL1123 (01)`). Aircraft on your frequency or owned
+  by your own sector show no number. The owner comes from the last QF, so QF again to refresh it.
 - **How long a pair lasts:** a CRC CID belongs to one pilot connection under one callsign, so the app keeps a pair
   for as long as that connection is on VATSIM, even across app restarts. It is saved in
   `%LOCALAPPDATA%\vUSALinkApp\cids.json`. A pair is dropped when the pilot reconnects (VATSIM logon time changes) or has

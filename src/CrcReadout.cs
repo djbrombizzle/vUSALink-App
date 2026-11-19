@@ -193,7 +193,19 @@ namespace VusaLinkApp
 
         public CidBook() { Load(); }
 
+        public event Action Changed;   // a pair was learned or dropped (may fire off the UI thread)
+
         public int Count { get { lock (sync) return byCid.Count; } }
+
+        // callsign -> {cid, sector}, the shape the EDST host API's setCids() takes.
+        public Dictionary<string, object> ForEdst()
+        {
+            lock (sync)
+                return byCid.ToDictionary(kv => kv.Value.Callsign, kv => (object)new Dictionary<string, object>
+                {
+                    { "cid", kv.Key }, { "sector", kv.Value.Sector ?? "" }
+                }, StringComparer.OrdinalIgnoreCase);
+        }
 
         public Entry Find(string cid)
         {
@@ -208,7 +220,7 @@ namespace VusaLinkApp
         public void Maintain()
         {
             RefreshFeed();
-            bool changed = false;
+            bool changed = false, dropped = false;
             lock (sync)
             {
                 var now = DateTime.UtcNow;
@@ -223,10 +235,11 @@ namespace VusaLinkApp
                         else { e.LastSeen = now; changed = true; }
                     }
                     else if (e.Verified ? now - e.LastSeen > GoneFor : now - e.At > UnverifiedTtl) why = "pilot disconnected";
-                    if (why != null) { byCid.Remove(kv.Key); changed = true; Log.Info("CID " + kv.Key + " = " + e.Callsign + " dropped (" + why + ")"); }
+                    if (why != null) { byCid.Remove(kv.Key); changed = dropped = true; Log.Info("CID " + kv.Key + " = " + e.Callsign + " dropped (" + why + ")"); }
                 }
             }
             if (changed) Save();
+            if (dropped && Changed != null) Changed();
         }
 
         void Load()
@@ -319,6 +332,7 @@ namespace VusaLinkApp
                 byCid[r.Cid] = e;
             }
             Save();
+            if (Changed != null) Changed();
             return e;
         }
 
