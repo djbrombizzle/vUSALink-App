@@ -95,14 +95,18 @@ namespace VusaLinkApp
             if (!string.IsNullOrEmpty(crcProc)) sync.ProcessName = CrcScreen.ProcessName = crcProc;
             sync.ReadoutLikely += () => ReadQfSoon(++readGen, 400, true);
             cids.Changed += () => Dispatcher.BeginInvoke(new Action(PushCids));
-            sync.CommandSkipped += cmd => Dispatcher.BeginInvoke(new Action(() =>
+            sync.CommandSkipped += cmd =>
             {
-                if (CrcForward.Gate(cmd) == null) return;
-                Log.Info("Edited line not mirrored: " + cmd);
-                last.Text = "✗ LINE EDITED IN CRC - NOT MIRRORED, RETYPE IT";
-                last.Foreground = Theme.Amber;
-                last.ToolTip = "Cursor keys, Delete or a Ctrl shortcut were used, so the app can't be sure what CRC's MCA held";
-            }));
+                var why = sync.LastSkipReason ?? "edited";
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (CrcForward.Gate(cmd) == null && CrcForward.Handoff(cmd) == null) return;
+                    Log.Info("Edited line not mirrored (" + why + "): " + cmd);
+                    last.Text = "✗ LINE CHANGED IN CRC (" + why.ToUpperInvariant() + ") - NOT MIRRORED, RETYPE IT";
+                    last.Foreground = Theme.Amber;
+                    last.ToolTip = "The line was changed in a way the app can't see (" + why + "), so it can't be sure what CRC's MCA held";
+                }));
+            };
             sync.CommandEntered += cmd => Dispatcher.BeginInvoke(new Action(() => OnCrcCommand(cmd)));
             if (CrcMirrorLock.TryAcquire()) sync.Start();
             else

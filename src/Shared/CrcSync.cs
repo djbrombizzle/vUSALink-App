@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Threading;
@@ -32,6 +34,19 @@ namespace VusaLinkApp
         IntPtr lastHwnd = IntPtr.Zero;
         bool lastWasCrc;
         bool dirty;   // the buffer may not match CRC's MCA (cursor moved, text recalled, ...)
+        string DirtyReason;          // which key made the line "edited"
+        public string LastSkipReason;   // why the last skipped line was skipped (read in CommandSkipped)
+
+        static string NavKeyName(int vk)
+        {
+            switch (vk)
+            {
+                case 0x21: return "PgUp"; case 0x22: return "PgDn"; case 0x23: return "End"; case 0x24: return "Home";
+                case 0x25: return "Left arrow"; case 0x26: return "Up arrow"; case 0x27: return "Right arrow"; case 0x28: return "Down arrow";
+                case 0x2D: return "Insert"; case 0x2E: return "Delete"; case 0x09: return "Tab";
+            }
+            return "VK 0x" + vk.ToString("X2");
+        }
         bool holdEnterUp; // the Enter press was held back, so hold back its release as well
 
         static readonly IntPtr Marker = (IntPtr)0x56555341; // "VUSA": tags keystrokes this app injects
@@ -50,6 +65,7 @@ namespace VusaLinkApp
         public void Start()
         {
             if (hook != IntPtr.Zero) return;
+            LoadCrcKeys();
             using (var p = Process.GetCurrentProcess())
             using (var m = p.MainModule)
             {
@@ -75,6 +91,11 @@ namespace VusaLinkApp
             {
                 if (nCode >= 0 && Enabled && wParam == (IntPtr)WM_MBUTTONDOWN && ReadoutLikely != null && CrcInForeground())
                     dispatcher.BeginInvoke(new Action(() => ReadoutLikely()));
+                // A left-click in CRC while a command is being typed can put the clicked aircraft into the MCA
+                // (CRC's "finish the command by clicking the target"): the app can't see which, so the line is
+                // no longer known exactly. Clicks with an empty line (e.g. Ctrl+Shift+click to start a track) are fine.
+                if (nCode >= 0 && Enabled && wParam == (IntPtr)WM_LBUTTONDOWN && buffer.Length > 0 && CrcInForeground())
+                    MarkEdited("mouse click while typing");
             }
             catch { }
             return CallNextHookEx(mouseHook, nCode, wParam, lParam);
@@ -84,6 +105,7 @@ namespace VusaLinkApp
         {
             buffer.Clear();
             dirty = false;
+            DirtyReason = null;
         }
 
         bool CrcInForeground()
@@ -103,6 +125,52 @@ namespace VusaLinkApp
             Reset();
             if (lastWasCrc) Log.Info("CRC sync: CRC window focused (hwnd " + hwnd + ")");
             return lastWasCrc;
+        }
+
+        // CRC's own key bindings (from %LOCALAPPDATA%\CRC\GeneralSettings.json): push-to-talk keys type nothing in
+        // the MCA, and the aircraft-select key inserts an aircraft the app can't see. CRC stores WPF Key values.
+        readonly HashSet<int> pttVks = new HashSet<int>();
+        int selectVk = -1;
+
+        void LoadCrcKeys()
+        {
+            try
+            {
+                var path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CRC", "GeneralSettings.json");
+                if (!System.IO.File.Exists(path)) return;
+                var root = Json.Parse(System.IO.File.ReadAllText(path));
+                foreach (var name in new[] { "Ptt0Configuration", "Ptt1Configuration" })
+                {
+                    var c = Json.Obj(root, name);
+                    if (c == null || Json.Str(c, "DeviceType") != "Keyboard") continue;
+                    int key = (int)Json.Num(c, "ButtonOrKey", 0);
+                    if (key <= 0) continue;
+                    int vk = System.Windows.Input.KeyInterop.VirtualKeyFromKey((System.Windows.Input.Key)key);
+                    if (vk > 0) pttVks.Add(vk);
+                    // Left/right modifier keys arrive in the low-level hook as their sided codes.
+                    if (vk == 0x11) { pttVks.Add(0xA2); pttVks.Add(0xA3); }
+                    if (vk == 0x10) { pttVks.Add(0xA0); pttVks.Add(0xA1); }
+                    if (vk == 0x12) { pttVks.Add(0xA4); pttVks.Add(0xA5); }
+                }
+                System.Windows.Input.Key sel;
+                var selName = Json.Str(root, "AircraftSelectKey");
+                if (!string.IsNullOrEmpty(selName) && Enum.TryParse(selName, out sel))
+                    selectVk = System.Windows.Input.KeyInterop.VirtualKeyFromKey(sel);
+                Log.Info("CRC sync: CRC keys: push-to-talk VK " + string.Join(",", pttVks.Select(v => "0x" + v.ToString("X2"))) +
+                    ", aircraft select VK " + (selectVk > 0 ? "0x" + selectVk.ToString("X2") : "none"));
+            }
+            catch (Exception ex) { Log.Info("CRC sync: couldn't read CRC key settings: " + ex.Message); }
+        }
+
+        static bool IsModifier(int vk)
+        {
+            return vk == 0x10 || vk == 0x11 || vk == 0x12 || (vk >= 0xA0 && vk <= 0xA5) || vk == 0x5B || vk == 0x5C || vk == 0x14 || vk == 0x90 || vk == 0x91;
+        }
+
+        void MarkEdited(string why)
+        {
+            if (!dirty) DirtyReason = why;
+            dirty = true;
         }
 
         IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam)
@@ -125,15 +193,25 @@ namespace VusaLinkApp
         // Returns true to keep the key from reaching CRC.
         bool OnKey(int vk)
         {
+            if (pttVks.Contains(vk)) return false;                           // push-to-talk: types nothing
+            if (IsModifier(vk)) return false;                                // Ctrl/Shift/Alt/Win/locks on their own
+            if (vk == selectVk)
+            {
+                // CRC's aircraft-select key puts the aircraft under the cursor into the MCA: the app can't see which.
+                if (buffer.Length > 0) MarkEdited("aircraft-select key");
+                return false;
+            }
             bool shift = (GetKeyState(0x10) & 0x8000) != 0;
+            // Ctrl + another key (e.g. Ctrl+R recall) can change the line, even when Ctrl is also push-to-talk:
+            // safer to ask for a retype than to guess.
             bool ctrl = (GetKeyState(0x11) & 0x8000) != 0;
-            if (ctrl) { dirty = true; return false; }                         // e.g. Ctrl+R recalls a command in CRC
+            if (ctrl) { MarkEdited("Ctrl+key (VK 0x" + vk.ToString("X2") + ")"); return false; }
             // CRC's ERAM function keys replace the MCA line with a command prefix (F5 -> "QZ ", F6 -> "QU ", ...).
             if (vk >= 0x70 && vk <= 0x78)
             {
                 var pre = shift ? ShiftFKeys[vk - 0x70] : FKeys[vk - 0x70];
-                if (pre != null) { buffer.Clear(); buffer.Append(pre); dirty = false; }
-                else dirty = true;   // unknown key: CRC may have changed the line
+                if (pre != null) { buffer.Clear(); buffer.Append(pre); dirty = false; DirtyReason = null; }
+                else MarkEdited((shift ? "Shift+" : "") + "F" + (vk - 0x6F));   // unknown key: CRC may have changed the line
                 return false;
             }
             if (vk >= 0x41 && vk <= 0x5A) buffer.Append((char)vk);
@@ -150,11 +228,13 @@ namespace VusaLinkApp
             else if (vk == 0xC0) buffer.Append(shift ? '~' : '`');
             else if (vk == 0x08) { if (buffer.Length > 0) buffer.Length--; }
             else if (vk == 0x1B) Reset();
-            else if ((vk >= 0x21 && vk <= 0x28) || vk == 0x2D || vk == 0x2E || vk == 0x09) dirty = true; // PgUp..Down, Ins, Del, Tab
+            else if ((vk >= 0x21 && vk <= 0x28) || vk == 0x2D || vk == 0x2E || vk == 0x09)
+                MarkEdited(NavKeyName(vk));   // PgUp/PgDn/End/Home/arrows, Ins, Del, Tab (also numpad keys with NumLock off)
             else if (vk == 0x0D)
             {
                 var raw = buffer.ToString();
                 bool exact = !dirty;
+                LastSkipReason = dirty ? DirtyReason : null;
                 Reset();
                 var cmd = raw.Trim();
                 if (cmd == "") return false;
@@ -210,7 +290,7 @@ namespace VusaLinkApp
             };
         }
 
-        const int WH_MOUSE_LL = 14, WM_MBUTTONDOWN = 0x207;
+        const int WH_MOUSE_LL = 14, WM_MBUTTONDOWN = 0x207, WM_LBUTTONDOWN = 0x201;
         const int WH_KEYBOARD_LL = 13, WM_KEYDOWN = 0x100, WM_KEYUP = 0x101, WM_SYSKEYDOWN = 0x104, WM_SYSKEYUP = 0x105;
         const uint INPUT_KEYBOARD = 1, KEYEVENTF_KEYUP = 2;
         delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);

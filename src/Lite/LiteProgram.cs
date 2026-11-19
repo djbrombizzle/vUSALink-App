@@ -80,11 +80,17 @@ namespace VusaLinkApp
                 ? "CRC Enter: [" + raw + "] erase=" + erase
                 : "CRC Enter: non-EDST line (" + raw.Trim().Length + " chars)");
             sync.CommandEntered += cmd => ui.BeginInvoke(new Action(() => OnCrcCommand(cmd)));
-            sync.CommandSkipped += cmd => ui.BeginInvoke(new Action(() =>
+            sync.CommandSkipped += cmd =>
             {
-                if (CrcForward.Gate(cmd) != null && CrcForward.IsUplinkLine(cmd))
-                    Notify("Line edited in CRC (cursor keys / Delete / Ctrl): not sent. Retype it.", true);
-            }));
+                var why = sync.LastSkipReason ?? "edited";
+                ui.BeginInvoke(new Action(() =>
+                {
+                    bool edst = CrcForward.Gate(cmd) != null || CrcForward.Handoff(cmd) != null;
+                    Log.Info("Edited line not mirrored (" + why + "): " + (edst ? cmd : "non-EDST line"));
+                    if (edst && CrcForward.IsUplinkLine(cmd))
+                        Notify("Not sent: the line was changed in CRC (" + why + "), so Lite can't be sure what it says. Retype it.", true);
+                }));
+            };
             sync.ReadoutLikely += () => ReadQfSoon(++readGen, 400, true);
             var crcProc = Environment.GetEnvironmentVariable("VUSALINK_CRC_PROCESS");
             if (!string.IsNullOrEmpty(crcProc)) sync.ProcessName = CrcScreen.ProcessName = crcProc;
