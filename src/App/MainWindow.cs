@@ -548,18 +548,15 @@ namespace VusaLinkApp
 
         List<Tuple<QfReadout, CidBook.Entry, string>> ReadQf()
         {
+            string info;
+            var readouts = CrcScreen.ReadReadouts(out info);
+            Log.Info("QF read: " + info);
             var outp = new List<Tuple<QfReadout, CidBook.Entry, string>>();
-            foreach (var bmp in CrcScreen.CaptureEramWindows())
-                using (bmp)
-                {
-                    var lines = CrcScreen.Ocr(bmp).GetAwaiter().GetResult();
-                    foreach (var r in QfReadout.Parse(lines))
-                    {
-                        string why;
-                        var e = cids.Learn(r, out why);
-                        outp.Add(Tuple.Create(r, e, why));
-                    }
-                }
+            foreach (var r in readouts)
+            {
+                string why;
+                outp.Add(Tuple.Create(r, cids.Learn(r, out why), why));
+            }
             return outp;
         }
 

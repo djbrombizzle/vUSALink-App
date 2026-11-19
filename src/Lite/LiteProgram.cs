@@ -194,14 +194,15 @@ namespace VusaLinkApp
             {
                 results = await Task.Run(() =>
                 {
+                    string info;
+                    var readouts = CrcScreen.ReadReadouts(out info);
+                    Log.Info("QF read (" + (retry ? "1st" : "2nd") + " look): " + info);
                     var outp = new List<Tuple<QfReadout, CidBook.Entry, string>>();
-                    foreach (var bmp in CrcScreen.CaptureEramWindows())
-                        using (bmp)
-                            foreach (var rd in QfReadout.Parse(CrcScreen.Ocr(bmp).GetAwaiter().GetResult()))
-                            {
-                                string why;
-                                outp.Add(Tuple.Create(rd, cids.Learn(rd, out why), why));
-                            }
+                    foreach (var rd in readouts)
+                    {
+                        string why;
+                        outp.Add(Tuple.Create(rd, cids.Learn(rd, out why), why));
+                    }
                     return outp;
                 });
             }

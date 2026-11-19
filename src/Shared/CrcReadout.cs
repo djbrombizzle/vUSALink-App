@@ -41,7 +41,7 @@ namespace VusaLinkApp
                     RECT r;
                     if (!GetWindowRect(h, out r)) continue;
                     int w = r.Right - r.Left, ht = r.Bottom - r.Top;
-                    if (w < 200 || ht < 150) continue;
+                    if (w < 400 || ht < 300) continue;   // tool windows (voice switch, messages ...) aren't scopes
                     var bmp = new Bitmap(w, ht, PixelFormat.Format32bppArgb);
                     using (var g = Graphics.FromImage(bmp))
                     {
@@ -66,13 +66,31 @@ namespace VusaLinkApp
                 uint pid;
                 GetWindowThreadProcessId(h, out pid);
                 if (!pids.Contains(pid) || !IsWindowVisible(h)) return true;
-                var sb = new StringBuilder(256);
-                GetWindowText(h, sb, sb.Capacity);
-                // CRC titles its scope windows "CRC : 1 : ERAM : ZDC". A stand-in for testing may not.
-                if (sb.ToString().Contains("ERAM") || ProcessName != "CRC") found.Add(h);
+                // Any real-sized CRC window: CRC titles a display window "CRC : 1 : ERAM : ZDC", but just "CRC : 1"
+                // when a browser tab (e.g. the EDST) is the selected tab, so the title can't be relied on.
+                // Small tool windows are skipped by size in CaptureEramWindows.
+                found.Add(h);
                 return true;
             }, IntPtr.Zero);
             return found;
+        }
+
+        // Captures CRC's windows, reads them and returns the QF readouts found. 'info' says what was seen, for the log.
+        public static List<QfReadout> ReadReadouts(out string info)
+        {
+            var all = new List<QfReadout>();
+            int wins = 0, lines = 0;
+            foreach (var bmp in CaptureEramWindows())
+                using (bmp)
+                {
+                    wins++;
+                    var l = Ocr(bmp).GetAwaiter().GetResult();
+                    lines += l.Length;
+                    all.AddRange(QfReadout.Parse(l));
+                }
+            info = wins + " CRC window(s) captured, " + lines + " text line(s), " + all.Count + " QF readout(s)" +
+                (wins == 0 ? " (no CRC window found)" : "");
+            return all;
         }
 
         // Windows OCR on light-on-black ERAM text: invert to dark-on-light first.
