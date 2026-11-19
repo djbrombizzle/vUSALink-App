@@ -96,6 +96,31 @@ namespace VusaLinkApp
             statusTimer.Tick += (s, e) => UpdateStatus();
             statusTimer.Start();
             UpdateStatus();
+            SelfTest();
+        }
+
+        // Debug: VUSALINK_LITE_SELFTEST="line1|line2|..." runs each line through exactly what happens on Enter in
+        // CRC (the CRC-line decision, then the EDST command) without pressing any keys, logs the results and exits.
+        // VUSALINK_LITE_SELFTEST_WAIT = seconds to wait first (default 10) so a test page can connect.
+        async void SelfTest()
+        {
+            var lines = Environment.GetEnvironmentVariable("VUSALINK_LITE_SELFTEST");
+            if (string.IsNullOrEmpty(lines)) return;
+            int wait;
+            if (!int.TryParse(Environment.GetEnvironmentVariable("VUSALINK_LITE_SELFTEST_WAIT"), out wait)) wait = 10;
+            await Task.Delay(wait * 1000);
+            Log.Info("SELFTEST start: EDST connected=" + link.HasEdst + " api=" + link.ApiVersion + " pages=" + link.PageCount);
+            foreach (var line in lines.Split('|'))
+            {
+                int erase = sync.TrimForCrc(line);
+                Log.Info("SELFTEST [" + line + "] CRC line: " +
+                    (erase > 0 ? "trim " + erase + " chars, then Enter" : erase < 0 ? "cleared, no Enter" : "left alone"));
+                OnCrcCommand(line);
+                await Task.Delay(1500);
+            }
+            await Task.Delay(1500);
+            Log.Info("SELFTEST done");
+            System.Windows.Application.Current.Shutdown();
         }
 
         public void Stop()

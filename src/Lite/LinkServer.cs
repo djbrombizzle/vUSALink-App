@@ -34,6 +34,7 @@ namespace VusaLinkApp
             public string Origin;
             public bool Hello, List;
             public int Api;
+            public DateTime ActiveAt;   // last focus / click / became visible (or when it said hello)
             public readonly SemaphoreSlim SendLock = new SemaphoreSlim(1, 1);
         }
 
@@ -78,10 +79,12 @@ namespace VusaLinkApp
             }
         }
 
-        // Pages that can take commands: the main EDST (not a LIST window) that has said hello.
+        // The page that takes commands: a main EDST (not a LIST window) that has said hello; with several, the one
+        // used most recently (focus, click or became visible), then the newest.
         Client Target()
         {
-            lock (sync) return clients.Where(c => c.Hello && !c.List && c.Ws.State == WebSocketState.Open).OrderByDescending(c => c.Id).FirstOrDefault();
+            lock (sync) return clients.Where(c => c.Hello && !c.List && c.Ws.State == WebSocketState.Open)
+                .OrderByDescending(c => c.ActiveAt).ThenByDescending(c => c.Id).FirstOrDefault();
         }
 
         public bool HasEdst { get { return Target() != null; } }
@@ -181,10 +184,17 @@ namespace VusaLinkApp
                 c.Hello = true;
                 c.Api = (int)Json.Num(o, "api", 0);
                 c.List = Json.Bool(o, "list") == true;
+                // A page that is in the foreground when it connects counts as just used; a background one doesn't
+                // take over from the page you're working in.
+                c.ActiveAt = Json.Bool(o, "active") == true ? DateTime.UtcNow : DateTime.MinValue.AddTicks(c.Id);
                 Log.Info("Link: page #" + c.Id + " is " + (c.List ? "a LIST window" : "the EDST") + ", host API v" + c.Api);
                 var cids = CurrentCids != null ? CurrentCids() : null;
                 if (cids != null) { var ignored = SendTo(c, new Dictionary<string, object> { { "t", "cids" }, { "map", cids } }); }
                 Changed();
+            }
+            else if (t == "active")
+            {
+                c.ActiveAt = DateTime.UtcNow;
             }
             else if (t == "result")
             {
