@@ -22,6 +22,18 @@ namespace VusaLinkApp
             return toks.Length >= 2 && Array.IndexOf(UplinkVerbs, toks[0]) >= 0 ? text : null;
         }
 
+        // ERAM handoff "<sector> <FLID>" (e.g. "11 AAL004"), same rule as the EDST page (host API v2).
+        // Not "240 AAL004" (an implied altitude) and not a CRC CID ("11 413").
+        static readonly Regex HandoffLine = new Regex(@"^(\d{1,2}|[A-Z]\d{1,2}|[A-Z]) ([A-Z][A-Z0-9]{1,7})$");
+
+        public static string Handoff(string raw)
+        {
+            string text;
+            Tokens(raw, out text);
+            var m = HandoffLine.Match(text);
+            return m.Success && m.Groups[2].Value.Any(char.IsDigit) ? text : null;
+        }
+
         // EDST-only modifiers CRC doesn't understand ("QZ 240 DAL123 /U" -> MESSAGE TOO LONG in CRC).
         static readonly string[] EdstMods = { "U", "PD", "IMM", "EXP", "TFC", "RES", "WX", "OK" };
         static readonly Regex TrailingMods = new Regex(@"(\s+/[A-Za-z/]+)+\s*$");

@@ -80,7 +80,8 @@ namespace VusaLinkApp
             sync.TrimForCrc = CrcForward.CrcTrimLength;
             // Log what happens on Enter in CRC. Only EDST commands are written out; anything else (chat etc.)
             // is logged as its length only.
-            sync.Diagnose = (raw, erase) => Log.Info(CrcForward.Gate(raw) != null || raw.TrimEnd().EndsWith("/U")
+            sync.Diagnose = (raw, erase) => Log.Info(CrcForward.Gate(raw) != null || CrcForward.Handoff(raw) != null
+                    || raw.TrimEnd().EndsWith("/U")
                 ? "CRC Enter: [" + raw + "] erase=" + erase
                 : "CRC Enter: non-EDST line (" + raw.Trim().Length + " chars)");
             var crcProc = Environment.GetEnvironmentVariable("VUSALINK_CRC_PROCESS");
@@ -333,7 +334,11 @@ namespace VusaLinkApp
         async Task Snapshot(string file)
         {
             await Task.Delay(8000);
-            // VUSALINK_PROBE=<seconds>: log when the page actually refreshes traffic during that window.
+            // VUSALINK_PRE / VUSALINK_POST: page scripts run first / after the injected command.
+            var pre = Environment.GetEnvironmentVariable("VUSALINK_PRE");
+            if (!string.IsNullOrEmpty(pre)) { Log.Info("Pre: " + await web.CoreWebView2.ExecuteScriptAsync(pre)); await Task.Delay(4000); }
+            // VUSALINK_PROBE=<seconds>: log when the page actually refreshes traffic during that window
+            // (also keeps the app open that long, e.g. while a stand-in CRC types).
             int probe;
             if (int.TryParse(Environment.GetEnvironmentVariable("VUSALINK_PROBE"), out probe) && probe > 0)
             {
@@ -343,10 +348,7 @@ namespace VusaLinkApp
                 await Task.Delay(probe * 1000);
                 Log.Info("Probe refreshVatsim at s: " + await web.CoreWebView2.ExecuteScriptAsync("JSON.stringify(window.__hits)"));
             }
-            // VUSALINK_PRE / VUSALINK_POST: page scripts run before / after the injected command.
             // {CS} in VUSALINK_INJECT becomes the first aircraft on the EDST list.
-            var pre = Environment.GetEnvironmentVariable("VUSALINK_PRE");
-            if (!string.IsNullOrEmpty(pre)) { Log.Info("Pre: " + await web.CoreWebView2.ExecuteScriptAsync(pre)); await Task.Delay(4000); }
             var inject = Environment.GetEnvironmentVariable("VUSALINK_INJECT");
             if (!string.IsNullOrEmpty(inject))
             {
@@ -431,13 +433,14 @@ namespace VusaLinkApp
         // amendment, reject) and shows its own MCA feedback; commands it doesn't handle come back "ignored".
         void HostCommand(string raw)
         {
-            var cmd = CrcForward.Gate(raw);
+            // v2 pages also take ERAM handoffs ("11 AAL004") and mark CPDLC aircraft for a one-click CONTACT.
+            var cmd = CrcForward.Gate(raw) ?? (apiVersion >= 2 ? CrcForward.Handoff(raw) : null);
             if (cmd == null || !ready) return;
             var js =
                 "(function(c){var post=function(o){o.t='host';o.cmd=c;window.chrome.webview.postMessage(JSON.stringify(o));};" +
                 "if(!window.vUSALinkEDST){post({ok:false,error:'EDST NOT READY'});return;}" +
                 "vUSALinkEDST.command(c,{source:'crc'}).then(function(r){r=r||{};" +
-                "post({ok:!!r.ok,action:r.action||'',error:r.error||'',flid:r.flid||''});})" +
+                "post({ok:!!r.ok,action:r.action||'',error:r.error||'',flid:r.flid||'',sector:r.sector||'',facility:r.facility||'',freq:r.freq||''});})" +
                 ".catch(function(){post({ok:false,error:'SEND FAIL'});});})(" + Json.Write(cmd) + ");";
             web.CoreWebView2.ExecuteScriptAsync(js);
         }
@@ -497,6 +500,16 @@ namespace VusaLinkApp
                 var cmd = Json.Str(o, "cmd");
                 var action = Json.Str(o, "action") ?? "";
                 if (action == "ignored") { Log.Info("Ignored by EDST: " + cmd); return; }
+                if (action == "handoff")
+                {
+                    var fac = Json.Str(o, "facility");
+                    last.Text = "▶ " + Json.Str(o, "flid") + " HANDOFF (" + Json.Str(o, "sector") + ")" +
+                        (string.IsNullOrEmpty(fac) ? " - CLICK ▶ IN EDST TO PICK FREQ" : " - CLICK ▶ IN EDST: CONTACT " + fac + " " + Json.Str(o, "freq"));
+                    last.Foreground = Theme.Amber;
+                    last.ToolTip = "On CPDLC: the EDST row shows ▶| (sector). Click it to send the frequency change.";
+                    Log.Info("Handoff marked " + cmd + " " + fac + " " + Json.Str(o, "freq"));
+                    return;
+                }
                 bool amend = t == "amend" || action == "amend";
                 var flid = Json.Str(o, "flid");
                 if (amend && !string.IsNullOrEmpty(flid) && !cmd.EndsWith(" " + flid)) cmd += " (" + flid + ")";

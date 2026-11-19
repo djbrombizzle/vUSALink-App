@@ -37,8 +37,8 @@ the app tells you where to get it.
 ## CRC mirroring
 
 While CRC is the focused window, the app watches what you type into CRC's MCA. Lines starting with `QZ`, `QQ`,
-`QU` or `QS` are handed to the EDST, which handles them exactly as if you had typed them into the EDST's own MCA.
-Nothing else typed in CRC (including chat) is passed on.
+`QU` or `QS`, and handoff lines (`<sector> <callsign>`), are handed to the EDST, which handles them exactly as if
+you had typed them into the EDST's own MCA. Nothing else typed in CRC (including chat) is passed on.
 
 ### Altitude amendment: nothing is sent
 
@@ -93,6 +93,24 @@ the EDST rejects the command and nothing is sent. The top bar shows why in red: 
 Only `QZ` has a no-`/U` form (the [altitude amendment](#altitude-amendment-nothing-is-sent) above). `QQ`, `QU` and `QS`
 without `/U` are rejected by the EDST with `REQUIRE /U`, and CRC handles them as normal.
 
+### Handoffs: one-click CPDLC frequency change
+
+When you start a handoff in CRC by typing the sector and the callsign (`11 AAL004`), CRC handles it as usual and the
+app also tells the EDST. If AAL004 is on CPDLC, its EDST row shows **`▶|` with an orange bar and the receiving
+sector**, for example `AAL004 ▶| (11)`. **Click `▶|`** to send the CPDLC frequency change (`CONTACT <center> <freq>`).
+The marker then becomes the EDST's normal `▶` "handoff pending WILCO".
+
+- **Finding the frequency:** the EDST looks up the receiving sector's controller in vNAS's public controller feed
+  (the ERAM sector of each position) for your ARTCC, for example "MINNEAPOLIS CENTER 133.400". It falls back to an
+  online `…_11_CTR` callsign. The top bar shows what it found.
+- **No controller online for that sector:** the marker is grey, and clicking it opens the EDST's normal HANDOFF menu
+  so you can choose.
+- **Right-click** the marker to dismiss it. It also clears by itself when the aircraft leaves CPDLC, after 15 minutes,
+  or when you send a handoff some other way.
+- **Not covered:** handoffs finished by clicking the aircraft in CRC, or typed with a CRC CID (`11 413`). The app only
+  sees typed callsigns. `240 AAL004` is an altitude, not a handoff.
+- **Requires** the EDST page with host API version 2 (vatflow, November 2026 or later).
+
 ### What isn't mirrored
 
 - **Lines you edited in CRC with cursor keys, Home/End, Delete or a Ctrl shortcut (such as Ctrl+R recall).** The app
@@ -130,8 +148,8 @@ The EDST page publishes `window.vUSALinkEDST`:
 
 | Member | |
 |---|---|
-| `version` | `1`. Bumped only if the API itself changes |
-| `command(text, {source})` | Runs an ERAM command the same way the EDST MCA does. Returns `{ok, action: 'uplink' \| 'amend' \| 'ignored', flid, error}`. With `source: 'crc'` the callsign must be typed (no fallback to the selected row), and commands the EDST doesn't handle come back `ignored` without touching the MCA |
+| `version` | `2`. Bumped only if the API itself changes. Version 2 added ERAM handoffs |
+| `command(text, {source})` | Runs an ERAM command the same way the EDST MCA does. Returns `{ok, action: 'uplink' \| 'amend' \| 'handoff' \| 'ignored', flid, error}` (`handoff` also has `sector`, `facility`, `freq`). With `source: 'crc'` the callsign must be typed (no fallback to the selected row), and commands the EDST doesn't handle come back `ignored` without touching the MCA |
 | `status()` | `{signedIn, canControl, testMode, listMode, refreshMs}` |
 
 Everything else in the page is internal and free to change. If the loaded page has no host API (an older EDST),
