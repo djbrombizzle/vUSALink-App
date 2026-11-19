@@ -4,6 +4,7 @@ param([string]$Out)   # optional output folder (default: .\bin)
 $ErrorActionPreference = 'Stop'
 $fw  = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319"
 $wpf = "$fw\WPF"
+$wm  = "$env:WINDIR\System32\WinMetadata"   # Windows Runtime metadata (OCR for CRC QF readouts); ships with Windows 10/11
 $lib = Join-Path $PSScriptRoot 'lib'
 $out = if ($Out) { $Out } else { Join-Path $PSScriptRoot 'bin' }
 New-Item -ItemType Directory -Force $out | Out-Null
@@ -14,6 +15,8 @@ $src = Get-ChildItem (Join-Path $PSScriptRoot 'src') -Filter *.cs | ForEach-Obje
     "/r:$wpf\PresentationCore.dll" "/r:$wpf\PresentationFramework.dll" "/r:$wpf\WindowsBase.dll" `
     "/r:$fw\System.Xaml.dll" /r:System.dll /r:System.Core.dll /r:System.Drawing.dll `
     "/r:$lib\Microsoft.Web.WebView2.Core.dll" "/r:$lib\Microsoft.Web.WebView2.Wpf.dll" `
+    "/r:$fw\System.Runtime.dll" "/r:$wm\Windows.Foundation.winmd" "/r:$wm\Windows.Media.winmd" `
+    "/r:$wm\Windows.Graphics.winmd" "/r:$wm\Windows.Storage.winmd" "/r:$wm\Windows.Globalization.winmd" `
     $src
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 Copy-Item "$lib\Microsoft.Web.WebView2.Core.dll", "$lib\Microsoft.Web.WebView2.Wpf.dll", "$lib\WebView2Loader.dll" $out -Force

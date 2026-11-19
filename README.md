@@ -107,9 +107,27 @@ The marker then becomes the EDST's normal `▶` "handoff pending WILCO".
   so you can choose.
 - **Right-click** the marker to dismiss it. It also clears by itself when the aircraft leaves CPDLC, after 15 minutes,
   or when you send a handoff some other way.
-- **Not covered:** handoffs finished by clicking the aircraft in CRC, or typed with a CRC CID (`11 413`). The app only
-  sees typed callsigns. `240 AAL004` is an altitude, not a handoff.
+- **Not covered:** handoffs finished by clicking the aircraft in CRC. A CRC CID (`11 413`) works once the app has
+  learned it from a QF (see [CRC CIDs](#crc-cids-learned-from-qf)). `240 AAL004` is an altitude, not a handoff.
 - **Requires** the EDST page with host API version 2 (vatflow, November 2026 or later).
+
+### CRC CIDs: learned from QF
+
+Use the CRC CID in place of the callsign (`QZ 240 151 /U`, `11 151`) once the app has seen that aircraft's **QF
+readout**. Run QF in CRC as usual: middle-click the data block, or type `QF <callsign>` / `QF <CID>`. CRC prints
+`151 SKW5646(32) E75L/L …` in its Response Area. The app reads that line and learns **151 = SKW5646** (owning sector
+`32`), and the top bar shows `CID 151 = SKW5646 (32)`. From then on, 151 in a mirrored command is passed to the EDST as
+SKW5646. CRC keeps its own line with the CID.
+
+- **How it's read:** CRC draws its ERAM display with OpenGL, so there is no text to query. Right after a QF the app
+  takes a picture of CRC's ERAM window and runs Windows' built-in text recognition (OCR) on it. The picture is
+  processed in memory and never saved or sent; only the parsed readout line is logged.
+- **Checked before it's trusted:** the readout's callsign must be a real flight in the VATSIM data with a matching type
+  or beacon code. A single misread character (OCR can read W as H) is corrected only when exactly one real flight fits.
+  On a test server (flights not on VATSIM) pairs are kept unverified; the EDST still checks the callsign exists.
+- **Unknown CID:** a `/U` uplink with a CID the app hasn't learned sends nothing, and the top bar says
+  `CID 151 NOT KNOWN - QF IT IN CRC FIRST`. Other lines with unknown CIDs (such as routine handoffs) are skipped quietly.
+- **Freshness:** a new QF replaces older pairs for that CID or callsign. Pairs expire after 4 hours.
 
 ### What isn't mirrored
 
@@ -118,8 +136,7 @@ The marker then becomes the EDST's normal `▶` "handoff pending WILCO".
   `LINE EDITED IN CRC - NOT MIRRORED, RETYPE IT`. Backspace is fine.
 - **Commands you finish by clicking an aircraft in CRC.** The app only sees typed text, so it never gets the callsign.
   Type the callsign.
-- **CRC CIDs** (`QZ 240 4A2`). vNAS assigns them and they aren't in the VATSIM data, so the EDST can't match them
-  and ignores the command. Type the callsign.
+- **CRC CIDs the app hasn't seen a QF for.** QF the aircraft once (see above), or type the callsign.
 - **CRC dot-aliases, data block work and everything else.** Ignored.
 
 ## Top bar
@@ -183,6 +200,7 @@ Debug switches (environment variables):
 | `VUSALINK_PRE` / `VUSALINK_POST` | Page scripts to run before / after it |
 | `VUSALINK_PROBE=<seconds>` | Log when the page refreshes traffic |
 | `VUSALINK_CRC_PROCESS=<name>` | Treat another process as CRC (for testing mirroring without CRC) |
+| `VUSALINK_QFREAD=1` | Read CRC's Response Area once at start-up, as after a QF |
 
 `build.ps1 -Out <folder>` builds into another folder, for example while the app in `bin\` is running.
 

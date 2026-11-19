@@ -18,13 +18,15 @@ namespace VusaLinkApp
     {
         public event Action<string> CommandEntered;
         public event Action<string> CommandSkipped;   // line was edited with cursor keys etc.: not passed on
+        public event Action ReadoutLikely;            // QF typed, or middle-click in CRC (QF on a data block)
         public bool Enabled = true;
         public string ProcessName = "CRC";      // VUSALINK_CRC_PROCESS can point this at a stand-in for testing
         public Func<string, int> TrimForCrc;    // characters to erase before CRC gets the line (0 = none)
         public Action<string, int> Diagnose;    // every Enter in CRC (raw line, chars to erase): for the log
 
         readonly StringBuilder buffer = new StringBuilder();
-        readonly LowLevelKeyboardProc proc;
+        readonly LowLevelKeyboardProc proc, mouseProc;
+        IntPtr mouseHook = IntPtr.Zero;
         readonly Dispatcher dispatcher;
         IntPtr hook = IntPtr.Zero;
         IntPtr lastHwnd = IntPtr.Zero;
@@ -40,7 +42,8 @@ namespace VusaLinkApp
 
         public CrcSync()
         {
-            proc = HookProc; // keep the delegate alive for the lifetime of the hook
+            proc = HookProc; // keep the delegates alive for the lifetime of the hooks
+            mouseProc = MouseProc;
             dispatcher = Dispatcher.CurrentDispatcher;
         }
 
@@ -49,14 +52,32 @@ namespace VusaLinkApp
             if (hook != IntPtr.Zero) return;
             using (var p = Process.GetCurrentProcess())
             using (var m = p.MainModule)
-                hook = SetWindowsHookEx(WH_KEYBOARD_LL, proc, GetModuleHandle(m.ModuleName), 0);
+            {
+                var mod = GetModuleHandle(m.ModuleName);
+                hook = SetWindowsHookEx(WH_KEYBOARD_LL, proc, mod, 0);
+                mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, mod, 0);
+            }
             if (hook == IntPtr.Zero) Log.Info("CRC sync: keyboard hook failed " + Marshal.GetLastWin32Error());
+            if (mouseHook == IntPtr.Zero) Log.Info("CRC sync: mouse hook failed " + Marshal.GetLastWin32Error());
         }
 
         public void Dispose()
         {
             if (hook != IntPtr.Zero) UnhookWindowsHookEx(hook);
-            hook = IntPtr.Zero;
+            if (mouseHook != IntPtr.Zero) UnhookWindowsHookEx(mouseHook);
+            hook = mouseHook = IntPtr.Zero;
+        }
+
+        // Only middle-button presses in CRC matter (that's QF on a data block); nothing else is looked at.
+        IntPtr MouseProc(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            try
+            {
+                if (nCode >= 0 && Enabled && wParam == (IntPtr)WM_MBUTTONDOWN && ReadoutLikely != null && CrcInForeground())
+                    dispatcher.BeginInvoke(new Action(() => ReadoutLikely()));
+            }
+            catch { }
+            return CallNextHookEx(mouseHook, nCode, wParam, lParam);
         }
 
         void Reset()
@@ -137,6 +158,8 @@ namespace VusaLinkApp
                 Reset();
                 var cmd = raw.Trim();
                 if (cmd == "") return false;
+                if (cmd.StartsWith("QF") && ReadoutLikely != null)
+                    dispatcher.BeginInvoke(new Action(() => ReadoutLikely()));
                 if (!exact)
                 {
                     // What's in CRC's MCA may differ from what the app saw, so never send a guess to the EDST.
@@ -179,6 +202,7 @@ namespace VusaLinkApp
             };
         }
 
+        const int WH_MOUSE_LL = 14, WM_MBUTTONDOWN = 0x207;
         const int WH_KEYBOARD_LL = 13, WM_KEYDOWN = 0x100, WM_KEYUP = 0x101, WM_SYSKEYDOWN = 0x104, WM_SYSKEYUP = 0x105;
         const uint INPUT_KEYBOARD = 1, KEYEVENTF_KEYUP = 2;
         delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);

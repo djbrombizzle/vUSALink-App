@@ -22,6 +22,36 @@ namespace VusaLinkApp
             return toks.Length >= 2 && Array.IndexOf(UplinkVerbs, toks[0]) >= 0 ? text : null;
         }
 
+        // CRC CIDs: in an EDST command or handoff, the FLID may be a CRC CID ("QZ 240 151 /U", "11 151").
+        // Known CIDs (learned from QF readouts) are swapped for the callsign. The FLID position is the last
+        // non-modifier token, and never the first argument of QZ/QQ/QU/QS (that's the altitude/fix/heading).
+        // Returns the text to send, or null with 'unknownCid' set when a CID isn't known (nothing is sent).
+        static readonly Regex CidLike = new Regex(@"^[0-9A-Z]{3}$");
+
+        public static string ResolveCid(string raw, Func<string, string> lookup, out string cid, out string unknownCid)
+        {
+            cid = unknownCid = null;
+            string text;
+            var toks = Tokens(raw, out text);
+            int idx = -1;
+            if (toks.Length >= 3 && Array.IndexOf(UplinkVerbs, toks[0]) >= 0)
+            {
+                for (int i = toks.Length - 1; i >= 2; i--) if (!toks[i].StartsWith("/")) { idx = i; break; }
+            }
+            else if (toks.Length == 2 && Regex.IsMatch(toks[0], @"^(\d{1,2}|[A-Z]\d{1,2}|[A-Z])$")) idx = 1;
+            if (idx < 0 || !CidLike.IsMatch(toks[idx]) || !toks[idx].Any(char.IsDigit)) return text;
+            var cs = lookup(toks[idx]);
+            if (cs != null)
+            {
+                cid = toks[idx];
+                toks[idx] = cs;
+                return string.Join(" ", toks);
+            }
+            // Starts with a digit: can't be a callsign, so it's a CID we haven't seen a QF for.
+            if (char.IsDigit(toks[idx][0])) { unknownCid = toks[idx]; return null; }
+            return text;   // "A12"-style: treat as a short callsign
+        }
+
         // ERAM handoff "<sector> <FLID>" (e.g. "11 AAL004"), same rule as the EDST page (host API v2).
         // Not "240 AAL004" (an implied altitude) and not a CRC CID ("11 413").
         static readonly Regex HandoffLine = new Regex(@"^(\d{1,2}|[A-Z]\d{1,2}|[A-Z]) ([A-Z][A-Z0-9]{1,7})$");

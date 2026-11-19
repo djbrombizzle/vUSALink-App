@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -37,6 +38,10 @@ namespace VusaLinkApp
         readonly WebView2 web = new WebView2();
         readonly TextBlock status = new TextBlock(), crcState = new TextBlock(), last = new TextBlock();
         readonly CrcSync sync = new CrcSync();
+        readonly CidBook cids = new CidBook();
+        int readGen;
+        string lastLearned = "";
+        DateTime lastLearnedAt = DateTime.MinValue;
         readonly DispatcherTimer crcTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         Border btnMirror, btnCrcBar, btnTop;
         CoreWebView2Environment env;
@@ -85,7 +90,8 @@ namespace VusaLinkApp
                 ? "CRC Enter: [" + raw + "] erase=" + erase
                 : "CRC Enter: non-EDST line (" + raw.Trim().Length + " chars)");
             var crcProc = Environment.GetEnvironmentVariable("VUSALINK_CRC_PROCESS");
-            if (!string.IsNullOrEmpty(crcProc)) sync.ProcessName = crcProc;
+            if (!string.IsNullOrEmpty(crcProc)) sync.ProcessName = CrcScreen.ProcessName = crcProc;
+            sync.ReadoutLikely += () => ReadQfSoon(++readGen, 400, true);
             sync.CommandSkipped += cmd => Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (CrcForward.Gate(cmd) == null) return;
@@ -334,6 +340,14 @@ namespace VusaLinkApp
         async Task Snapshot(string file)
         {
             await Task.Delay(8000);
+            // VUSALINK_QFREAD=1: read CRC's Response Area once (as after a QF) before anything else.
+            if (Environment.GetEnvironmentVariable("VUSALINK_QFREAD") == "1")
+            {
+                var sw = Stopwatch.StartNew();
+                ReadQfSoon(++readGen, 0, false);
+                await Task.Delay(3000);
+                Log.Info("QF read test done (" + sw.ElapsedMilliseconds + " ms incl. wait), top bar: " + last.Text);
+            }
             // VUSALINK_PRE / VUSALINK_POST: page scripts run first / after the injected command.
             var pre = Environment.GetEnvironmentVariable("VUSALINK_PRE");
             if (!string.IsNullOrEmpty(pre)) { Log.Info("Pre: " + await web.CoreWebView2.ExecuteScriptAsync(pre)); await Task.Delay(4000); }
@@ -433,9 +447,26 @@ namespace VusaLinkApp
         // amendment, reject) and shows its own MCA feedback; commands it doesn't handle come back "ignored".
         void HostCommand(string raw)
         {
+            // A CRC CID in the FLID position is swapped for the callsign learned from a QF readout.
+            string cid, unknownCid;
+            var resolved = CrcForward.ResolveCid(raw, c => { var e = cids.Find(c); return e != null ? e.Callsign : null; },
+                out cid, out unknownCid);
+            if (resolved == null)
+            {
+                Log.Info("CID " + unknownCid + " not known: " + raw.Trim());
+                if (raw.Contains("/")
+                    && (raw.ToUpperInvariant().Contains("/U") && CrcForward.Gate(raw) != null))
+                {
+                    last.Text = "✗ CID " + unknownCid + " NOT KNOWN - QF IT IN CRC FIRST (NOTHING SENT)";
+                    last.Foreground = Theme.Red;
+                    last.ToolTip = "The app learns CID = callsign from QF readouts in CRC's Response Area (typed QF or middle-click on a data block)";
+                }
+                return;
+            }
             // v2 pages also take ERAM handoffs ("11 AAL004") and mark CPDLC aircraft for a one-click CONTACT.
-            var cmd = CrcForward.Gate(raw) ?? (apiVersion >= 2 ? CrcForward.Handoff(raw) : null);
+            var cmd = CrcForward.Gate(resolved) ?? (apiVersion >= 2 ? CrcForward.Handoff(resolved) : null);
             if (cmd == null || !ready) return;
+            if (cid != null) Log.Info("CID " + cid + " -> " + cmd);
             var js =
                 "(function(c){var post=function(o){o.t='host';o.cmd=c;window.chrome.webview.postMessage(JSON.stringify(o));};" +
                 "if(!window.vUSALinkEDST){post({ok:false,error:'EDST NOT READY'});return;}" +
@@ -443,6 +474,54 @@ namespace VusaLinkApp
                 "post({ok:!!r.ok,action:r.action||'',error:r.error||'',flid:r.flid||'',sector:r.sector||'',facility:r.facility||'',freq:r.freq||''});})" +
                 ".catch(function(){post({ok:false,error:'SEND FAIL'});});})(" + Json.Write(cmd) + ");";
             web.CoreWebView2.ExecuteScriptAsync(js);
+        }
+
+        // ---------------------------------------------------------------- CRC QF readouts -> CIDs
+
+        // After a QF (typed, or middle-click on a data block) CRC prints the flight plan in its Response Area.
+        // Read it shortly after; if nothing new is there yet, look once more.
+        async void ReadQfSoon(int gen, int delayMs, bool retry)
+        {
+            await Task.Delay(delayMs);
+            if (gen != readGen) return;   // a newer QF superseded this one
+            List<Tuple<QfReadout, CidBook.Entry, string>> results;
+            try { results = await Task.Run(() => ReadQf()); }
+            catch (Exception ex) { Log.Info("QF read failed: " + ex.Message); return; }
+            var learned = results.Where(r => r.Item2 != null).ToList();
+            foreach (var r in results)
+                Log.Info(r.Item2 != null
+                    ? "QF read: " + r.Item1 + " -> CID " + r.Item1.Cid + " = " + r.Item2.Callsign + (r.Item2.Verified ? "" : " (not on VATSIM, unverified)")
+                    : "QF read rejected: " + r.Item1 + " (" + r.Item3 + ")");
+            var top = learned.LastOrDefault();
+            if (top == null)
+            {
+                if (retry) ReadQfSoon(gen, 900, false);
+                return;
+            }
+            var key = top.Item1.Cid + "=" + top.Item2.Callsign;
+            if (key == lastLearned && (DateTime.UtcNow - lastLearnedAt).TotalSeconds < 20 && retry) { ReadQfSoon(gen, 900, false); }
+            lastLearned = key; lastLearnedAt = DateTime.UtcNow;
+            last.Text = "CID " + top.Item1.Cid + " = " + top.Item2.Callsign + " (" + top.Item2.Sector + ")";
+            last.Foreground = Theme.Teal;
+            last.ToolTip = "Learned from CRC's QF readout: you can now use " + top.Item1.Cid + " in place of " + top.Item2.Callsign +
+                ". (" + top.Item2.Sector + ") is the sector that owns the track." + (top.Item2.Verified ? "" : " Not found on VATSIM, so not cross-checked.");
+        }
+
+        List<Tuple<QfReadout, CidBook.Entry, string>> ReadQf()
+        {
+            var outp = new List<Tuple<QfReadout, CidBook.Entry, string>>();
+            foreach (var bmp in CrcScreen.CaptureEramWindows())
+                using (bmp)
+                {
+                    var lines = CrcScreen.Ocr(bmp).GetAwaiter().GetResult();
+                    foreach (var r in QfReadout.Parse(lines))
+                    {
+                        string why;
+                        var e = cids.Learn(r, out why);
+                        outp.Add(Tuple.Create(r, e, why));
+                    }
+                }
+            return outp;
         }
 
         void LegacyCommand(string raw)
