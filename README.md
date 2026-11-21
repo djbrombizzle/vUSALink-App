@@ -171,8 +171,10 @@ readout**. Run QF in CRC as usual: middle-click the data block, or type `QF <cal
 SKW5646. CRC keeps its own line with the CID.
 
 - **How it's read:** CRC draws its ERAM display with OpenGL, so there is no text to query. Right after a QF the app
-  takes a picture of CRC's ERAM window and runs Windows' built-in text recognition (OCR) on it. The picture is
-  processed in memory and never saved or sent; only the parsed readout line is logged.
+  takes a picture of CRC's ERAM window and runs Windows' built-in text recognition (OCR) on it. It keeps looking for
+  up to 3.5 s until the new readout appears (CRC draws it a moment after the QF), and if the readout's first line is
+  garbled it reads that spot again enlarged. The picture is processed in memory and never saved or sent; only the
+  parsed readout line is logged.
 - **Checked before it's trusted:** the readout's callsign must be a real flight in the VATSIM data with a matching type
   or beacon code. A single misread character (OCR can read W as H) is corrected only when exactly one real flight fits.
   On a test server (flights not on VATSIM) pairs are kept unverified; the EDST still checks the callsign exists.
@@ -216,7 +218,6 @@ Settings (window position, zoom, toggles) are in `%LOCALAPPDATA%\vUSALinkApp\set
 | Setting | Default | |
 |---|---|---|
 | `Url` | `https://vatflow.io/vusalink/edst/` | EDST page to load. A URL on the command line overrides it |
-| `RefreshSeconds` | `15` | Only used with older EDST pages that predate the host API (they refreshed every 30 s). Current pages set their own rate |
 
 ## How the app talks to the EDST
 
@@ -224,15 +225,21 @@ The EDST page publishes `window.vUSALinkEDST`:
 
 | Member | |
 |---|---|
-| `version` | `2`. Bumped only if the API itself changes. Version 2 added ERAM handoffs |
+| `version` | `2`. Bumped only if the API itself changes. Version 2 added ERAM handoffs, UC and `setCids` |
 | `command(text, {source})` | Runs an ERAM command the same way the EDST MCA does. Returns `{ok, action: 'uplink' \| 'amend' \| 'handoff' \| 'ignored', flid, error}` (`handoff` also has `sector`, `facility`, `freq`). With `source: 'crc'` the callsign must be typed (no fallback to the selected row), and commands the EDST doesn't handle come back `ignored` without touching the MCA |
-| `status()` | `{signedIn, canControl, testMode, listMode, refreshMs}` |
+| `setCids(map)` | v2. `{CALLSIGN: {cid, sector}}` learned from CRC QF readouts. Replaces the page's table; the page shows the CID left of the callsign and `(sector)` when another sector owns the track |
+| `status()` | `{signedIn, canControl, testMode, listMode, refreshMs, mySectors}` |
 
-Everything else in the page is internal and free to change. If the loaded page has no host API (an older EDST),
-the app falls back to its previous method for one release.
+Everything else in the page is internal and free to change. If the loaded page has no host API, the app passes
+nothing on and leaves CRC's line alone (the top bar shows `EDST HOST API NOT FOUND`). vUSALink-Lite talks to the
+page through the same host API, over its local link.
 
 ## Limits
 
+- **CRC and the app must run at the same level.** If CRC was started as administrator and the app wasn't, Windows
+  hides what you type and click in CRC from the app: nothing is mirrored and QF isn't read. The top bar then shows
+  `CRC ● RUNS AS ADMIN` (Lite shows a notification). Start CRC normally from the Start menu, or run the app as
+  administrator too.
 - Needs internet, because the EDST is served from vatflow.io. If it can't load, the top bar shows OFFLINE and retries every 15 s.
 - Traffic is as fresh as the VATSIM data feed (about 15 s; the EDST refreshes every 15 s). CRC gets its traffic
   from vNAS over an encrypted connection and offers no local feed, so the app can't read CRC's traffic.
@@ -260,6 +267,7 @@ Debug switches (environment variables):
 | `VUSALINK_PROBE=<seconds>` | Log when the page refreshes traffic |
 | `VUSALINK_CRC_PROCESS=<name>` | Treat another process as CRC (for testing mirroring without CRC) |
 | `VUSALINK_QFREAD=1` | Read CRC's Response Area once at start-up, as after a QF |
+| `VUSALINK_QFDUMP=<folder>` | Save every capture of CRC taken after a QF, and the text OCR read from it, to that folder. A `qfdump` folder next to the exe does the same. Captures show all of CRC's windows, so delete them afterwards |
 
 `build.ps1 -Out <folder>` builds into another folder, for example while the app in `bin\` is running.
 

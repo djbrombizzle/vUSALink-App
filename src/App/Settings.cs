@@ -20,7 +20,6 @@ namespace VusaLinkApp
         public bool Mirror = true;    // forward "/U" commands typed in CRC to the EDST MCA
         public bool Topmost;
         public double Zoom = 1.0;
-        public int RefreshSeconds = 15; // EDST traffic refresh (page default is 30 s); 0 = leave the page's own rate
         public double Left = double.NaN, Top = double.NaN, Width = 1400, Height = 860;
         public bool Maximized;
 
@@ -40,7 +39,6 @@ namespace VusaLinkApp
                 s.Mirror = Bool(d, "Mirror", s.Mirror);
                 s.Topmost = Bool(d, "Topmost", s.Topmost);
                 s.Zoom = Num(d, "Zoom", s.Zoom);
-                s.RefreshSeconds = (int)Num(d, "RefreshSeconds", s.RefreshSeconds);
                 s.Left = Num(d, "Left", s.Left);
                 s.Top = Num(d, "Top", s.Top);
                 s.Width = Num(d, "Width", s.Width);
@@ -79,7 +77,6 @@ namespace VusaLinkApp
                     "Mirror=" + Mirror,
                     "Topmost=" + Topmost,
                     "Zoom=" + Zoom.ToString(c),
-                    "RefreshSeconds=" + RefreshSeconds,
                     "Left=" + Left.ToString(c),
                     "Top=" + Top.ToString(c),
                     "Width=" + Width.ToString(c),

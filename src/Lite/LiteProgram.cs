@@ -16,7 +16,7 @@ namespace VusaLinkApp
     // the EDST page open in a CRC browser tab (or any browser) over a local link (see LinkServer).
     static class LiteProgram
     {
-        public const string Version = "0.3.1";
+        public const string Version = "0.3.2";
 
         [STAThread]
         static void Main()
@@ -54,8 +54,8 @@ namespace VusaLinkApp
         readonly DispatcherTimer cidTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         Forms.NotifyIcon tray;
         Forms.ToolStripMenuItem miCrc, miEdst, miLast, miMirror, miStartup;
-        bool mirrorOwned, mirrorOn = true;
-        int readGen;
+        bool mirrorOwned, mirrorOn = true, warnedElevated;
+        QfReader qf;
         string lastText = "";
 
         public void Start()
@@ -91,7 +91,9 @@ namespace VusaLinkApp
                         Notify("Not sent: the line was changed in CRC (" + why + "), so Lite can't be sure what it says. Retype it.", true);
                 }));
             };
-            sync.ReadoutLikely += () => ReadQfSoon(++readGen, 400, true);
+            qf = new QfReader(cids) { Enabled = () => mirrorOn };
+            qf.Learned += (r, e) => SetLast("CID " + r.Cid + " = " + e.Callsign + " (" + e.Sector + ")");
+            sync.ReadoutLikely += qf.Trigger;
             var crcProc = Environment.GetEnvironmentVariable("VUSALINK_CRC_PROCESS");
             if (!string.IsNullOrEmpty(crcProc)) sync.ProcessName = CrcScreen.ProcessName = crcProc;
 
@@ -183,39 +185,6 @@ namespace VusaLinkApp
             }
         }
 
-        // ---------------------------------------------------------------- CRC QF readouts -> CIDs
-
-        async void ReadQfSoon(int gen, int delayMs, bool retry)
-        {
-            await Task.Delay(delayMs);
-            if (gen != readGen || !mirrorOn) return;
-            List<Tuple<QfReadout, CidBook.Entry, string>> results;
-            try
-            {
-                results = await Task.Run(() =>
-                {
-                    string info;
-                    var readouts = CrcScreen.ReadReadouts(out info);
-                    Log.Info("QF read (" + (retry ? "1st" : "2nd") + " look): " + info);
-                    var outp = new List<Tuple<QfReadout, CidBook.Entry, string>>();
-                    foreach (var rd in readouts)
-                    {
-                        string why;
-                        outp.Add(Tuple.Create(rd, cids.Learn(rd, out why), why));
-                    }
-                    return outp;
-                });
-            }
-            catch (Exception ex) { Log.Info("QF read failed: " + ex.Message); return; }
-            foreach (var r in results)
-                Log.Info(r.Item2 != null
-                    ? "QF read: " + r.Item1 + " -> CID " + r.Item1.Cid + " = " + r.Item2.Callsign + (r.Item2.Verified ? "" : " (not on VATSIM, unverified)")
-                    : "QF read rejected: " + r.Item1 + " (" + r.Item3 + ")");
-            var top = results.LastOrDefault(r => r.Item2 != null);
-            if (top == null) { if (retry) ReadQfSoon(gen, 900, false); return; }
-            SetLast("CID " + top.Item1.Cid + " = " + top.Item2.Callsign + " (" + top.Item2.Sector + ")");
-        }
-
         // ---------------------------------------------------------------- tray
 
         void BuildTray()
@@ -254,7 +223,14 @@ namespace VusaLinkApp
             bool crc = Process.GetProcessesByName(sync.ProcessName).Length > 0;
             int pages = link.PageCount;
             bool edst = link.HasEdst;
-            miCrc.Text = "CRC: " + (crc ? "running" : "not running") + (!mirrorOwned ? " (watched by vUSALink App)" : !mirrorOn ? " (mirroring off)" : "");
+            miCrc.Text = "CRC: " + (crc ? "running" : "not running") + (!mirrorOwned ? " (watched by vUSALink App)" : !mirrorOn ? " (mirroring off)" : "")
+                + (crc && sync.CrcElevated ? " AS ADMIN: start CRC normally" : "");
+            if (crc && sync.CrcElevated && !warnedElevated)
+            {
+                warnedElevated = true;
+                Notify("CRC is running as administrator, so Windows hides what you type in CRC from Lite. Start CRC normally, or run Lite as administrator too.", true);
+            }
+            if (!sync.CrcElevated) warnedElevated = false;
             miEdst.Text = "EDST: " + (edst ? "connected" + (pages > 1 ? " (" + pages + " pages)" : "") + ", host API v" + link.ApiVersion
                 : link.StartError != null ? "link unavailable" : "not connected (open the EDST in a CRC tab)");
             miLast.Text = "Last: " + (lastText == "" ? "-" : lastText) + (cids.Count > 0 ? "   · " + cids.Count + " CID(s) learned" : "");

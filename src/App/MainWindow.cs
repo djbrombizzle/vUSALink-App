@@ -39,9 +39,7 @@ namespace VusaLinkApp
         readonly TextBlock status = new TextBlock(), crcState = new TextBlock(), last = new TextBlock();
         readonly CrcSync sync = new CrcSync();
         readonly CidBook cids = new CidBook();
-        int readGen;
-        string lastLearned = "";
-        DateTime lastLearnedAt = DateTime.MinValue;
+        readonly QfReader qf;
         readonly DispatcherTimer crcTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         Border btnMirror, btnCrcBar, btnTop;
         CoreWebView2Environment env;
@@ -84,7 +82,8 @@ namespace VusaLinkApp
             sync.Enabled = cfg.Mirror;
             // /U is trimmed off before CRC gets the line; a UC line (CRC has no UC) is cleared from CRC entirely,
             // but only when the loaded EDST takes UC (host API v2), so a line never just disappears.
-            sync.TrimForCrc = raw => CrcForward.CrcTrimLength(raw, ready && apiVersion >= 2 && cfg.Mirror);
+            // Nothing is trimmed when the page has no host API (nothing can send the command then).
+            sync.TrimForCrc = raw => ready && apiVersion >= 1 ? CrcForward.CrcTrimLength(raw, apiVersion >= 2 && cfg.Mirror) : 0;
             // Log what happens on Enter in CRC. Only EDST commands are written out; anything else (chat etc.)
             // is logged as its length only.
             sync.Diagnose = (raw, erase) => Log.Info(CrcForward.Gate(raw) != null || CrcForward.Handoff(raw) != null
@@ -93,7 +92,9 @@ namespace VusaLinkApp
                 : "CRC Enter: non-EDST line (" + raw.Trim().Length + " chars)");
             var crcProc = Environment.GetEnvironmentVariable("VUSALINK_CRC_PROCESS");
             if (!string.IsNullOrEmpty(crcProc)) sync.ProcessName = CrcScreen.ProcessName = crcProc;
-            sync.ReadoutLikely += () => ReadQfSoon(++readGen, 400, true);
+            qf = new QfReader(cids);
+            qf.Learned += ShowLearned;
+            sync.ReadoutLikely += qf.Trigger;
             cids.Changed += () => Dispatcher.BeginInvoke(new Action(PushCids));
             sync.CommandSkipped += cmd =>
             {
@@ -221,6 +222,14 @@ namespace VusaLinkApp
         void UpdateCrcState()
         {
             bool running = Process.GetProcessesByName("CRC").Length > 0;
+            if (running && sync.CrcElevated)
+            {
+                crcState.Text = "CRC ● RUNS AS ADMIN - MIRRORING AND QF CAN'T WORK. START CRC NORMALLY";
+                crcState.Foreground = Theme.Amber;
+                crcState.ToolTip = "CRC was started as administrator and this app wasn't, so Windows hides what you type and click in CRC from the app. " +
+                    "Restart CRC normally (Start menu), or run vUSALink App as administrator too.";
+                return;
+            }
             crcState.Text = running ? "CRC ●" : "CRC ○";
             crcState.Foreground = running ? Theme.Green : Theme.Dim;
             crcState.ToolTip = (running
@@ -289,12 +298,8 @@ namespace VusaLinkApp
                 SetStatus(Short(core.Source), Theme.Dim);
                 apiVersion = await DetectHostApi();
                 if (apiVersion >= 2) PushCids();
-                if (apiVersion < 1)
-                {
-                    // Older EDST page without the host API: patch it the old way (remove after one release).
-                    await LegacyApplyRefreshRate();
-                    await LegacyInstallAltMenuHook();
-                }
+                if (apiVersion < 1 && IsEdstPage(core.Source))
+                    SetStatus("EDST HOST API NOT FOUND - CRC MIRRORING PAUSED (RELOAD, OR UPDATE THE EDST PAGE)", Theme.Amber);
                 var snap = Environment.GetEnvironmentVariable("VUSALINK_SNAPSHOT");
                 if (!string.IsNullOrEmpty(snap)) await Snapshot(snap);
                 return;
@@ -326,37 +331,11 @@ namespace VusaLinkApp
             catch (Exception ex) { Log.Info("Host API check failed: " + ex.Message); return 0; }
         }
 
-        // ---- Legacy: EDST pages from before the host API (vatflow before Nov 2026). Remove after one release. ----
-
-        // Re-schedules the page's own refresh at the VATSIM feed cadence (the old page used 30 s).
-        async Task LegacyApplyRefreshRate()
+        // The EDST itself (not a sign-in or other vatflow page the main window may be showing).
+        static bool IsEdstPage(string uri)
         {
-            if (cfg.RefreshSeconds <= 0) return;
-            int sec = Math.Max(5, cfg.RefreshSeconds);
-            var js =
-                "(function(ms){if(typeof scheduleVatsim!=='function'||typeof refreshVatsim!=='function')return 'no-edst';" +
-                "scheduleVatsim=function(){if(vatsimTimer)clearInterval(vatsimTimer);" +
-                "vatsimTimer=setInterval(function(){refreshVatsim(!!listMode());},listMode()?4000:ms);};" +
-                "if(vatsimTimer)scheduleVatsim();return 'ok';})(" + (sec * 1000) + ")";
-            try
-            {
-                var r = await web.CoreWebView2.ExecuteScriptAsync(js);
-                Log.Info("Refresh rate " + sec + " s: " + r);
-            }
-            catch (Exception ex) { Log.Info("Refresh rate inject failed: " + ex.Message); }
-        }
-
-        // When the EDST altitude menu opens for an aircraft whose altitude was amended from CRC, pre-select that
-        // altitude (the EDST's own stageAlt) so UPLINK is one click. One-shot per amendment.
-        async Task LegacyInstallAltMenuHook()
-        {
-            var js =
-                "(function(){if(window.__edstcAltHook||typeof openAltMenu!=='function'||typeof stageAlt!=='function')return 'skip';" +
-                "window.__edstcAltHook=1;var orig=openAltMenu;" +
-                "openAltMenu=function(i,x,y){orig(i,x,y);try{var c=altTarget&&altTarget.cs,m=window.__crcAsg;" +
-                "if(c&&m&&m[c]!=null){if(assigned[c]===m[c])stageAlt(m[c]);delete m[c];}}catch(e){}};return 'ok';})()";
-            try { Log.Info("Alt menu hook: " + await web.CoreWebView2.ExecuteScriptAsync(js)); }
-            catch (Exception ex) { Log.Info("Alt menu hook failed: " + ex.Message); }
+            Uri u;
+            return Uri.TryCreate(uri, UriKind.Absolute, out u) && u.AbsolutePath.StartsWith("/vusalink/edst", StringComparison.OrdinalIgnoreCase);
         }
 
         // Debug: VUSALINK_SNAPSHOT=<file.png> captures the page once loaded, then exits.
@@ -368,7 +347,7 @@ namespace VusaLinkApp
             if (Environment.GetEnvironmentVariable("VUSALINK_QFREAD") == "1")
             {
                 var sw = Stopwatch.StartNew();
-                ReadQfSoon(++readGen, 0, false);
+                qf.Trigger();
                 await Task.Delay(3000);
                 Log.Info("QF read test done (" + sw.ElapsedMilliseconds + " ms incl. wait), top bar: " + last.Text);
             }
@@ -461,16 +440,22 @@ namespace VusaLinkApp
 
         // ---------------------------------------------------------------- CRC -> EDST
 
-        void OnCrcCommand(string raw)
-        {
-            if (apiVersion >= 1) HostCommand(raw);
-            else LegacyCommand(raw);
-        }
-
         // Hands a CRC command to the EDST's host API. The page decides what it means (/U uplink, plain QZ
         // amendment, reject) and shows its own MCA feedback; commands it doesn't handle come back "ignored".
-        void HostCommand(string raw)
+        // A page without the host API gets nothing (and CRC's line is left alone, see TrimForCrc).
+        void OnCrcCommand(string raw)
         {
+            if (apiVersion < 1)
+            {
+                if (ready && CrcForward.IsUplinkLine(raw))
+                {
+                    Log.Info("No EDST host API, not sent: " + raw.Trim());
+                    last.Text = "✗ " + raw.Trim().ToUpperInvariant() + "  EDST HOST API NOT FOUND - NOT SENT";
+                    last.Foreground = Theme.Red;
+                    last.ToolTip = "The loaded page doesn't publish window.vUSALinkEDST. Reload, or check the EDST URL in settings.ini";
+                }
+                return;
+            }
             // A CRC CID in the FLID position is swapped for the callsign learned from a QF readout.
             string cid, unknownCid;
             var resolved = CrcForward.ResolveCid(raw, c => { var e = cids.Find(c); return e != null ? e.Callsign : null; },
@@ -502,33 +487,13 @@ namespace VusaLinkApp
 
         // ---------------------------------------------------------------- CRC QF readouts -> CIDs
 
-        // After a QF (typed, or middle-click on a data block) CRC prints the flight plan in its Response Area.
-        // Read it shortly after; if nothing new is there yet, look once more.
-        async void ReadQfSoon(int gen, int delayMs, bool retry)
+        // A CID learned from a QF readout in CRC's Response Area (see QfReader).
+        void ShowLearned(QfReadout r, CidBook.Entry e)
         {
-            await Task.Delay(delayMs);
-            if (gen != readGen) return;   // a newer QF superseded this one
-            List<Tuple<QfReadout, CidBook.Entry, string>> results;
-            try { results = await Task.Run(() => ReadQf()); }
-            catch (Exception ex) { Log.Info("QF read failed: " + ex.Message); return; }
-            var learned = results.Where(r => r.Item2 != null).ToList();
-            foreach (var r in results)
-                Log.Info(r.Item2 != null
-                    ? "QF read: " + r.Item1 + " -> CID " + r.Item1.Cid + " = " + r.Item2.Callsign + (r.Item2.Verified ? "" : " (not on VATSIM, unverified)")
-                    : "QF read rejected: " + r.Item1 + " (" + r.Item3 + ")");
-            var top = learned.LastOrDefault();
-            if (top == null)
-            {
-                if (retry) ReadQfSoon(gen, 900, false);
-                return;
-            }
-            var key = top.Item1.Cid + "=" + top.Item2.Callsign;
-            if (key == lastLearned && (DateTime.UtcNow - lastLearnedAt).TotalSeconds < 20 && retry) { ReadQfSoon(gen, 900, false); }
-            lastLearned = key; lastLearnedAt = DateTime.UtcNow;
-            last.Text = "CID " + top.Item1.Cid + " = " + top.Item2.Callsign + " (" + top.Item2.Sector + ")";
+            last.Text = "CID " + r.Cid + " = " + e.Callsign + " (" + e.Sector + ")";
             last.Foreground = Theme.Teal;
-            last.ToolTip = "Learned from CRC's QF readout: you can now use " + top.Item1.Cid + " in place of " + top.Item2.Callsign +
-                ". (" + top.Item2.Sector + ") is the sector that owns the track." + (top.Item2.Verified ? "" : " Not found on VATSIM, so not cross-checked.");
+            last.ToolTip = "Learned from CRC's QF readout: you can now use " + r.Cid + " in place of " + e.Callsign +
+                ". (" + e.Sector + ") is the sector that owns the track." + (e.Verified ? "" : " Not found on VATSIM, so not cross-checked.");
         }
 
         // Shows learned CIDs in the EDST: CID left of the callsign, and "(sector)" after it when another
@@ -546,72 +511,13 @@ namespace VusaLinkApp
             catch (Exception ex) { Log.Info("CID push failed: " + ex.Message); }
         }
 
-        List<Tuple<QfReadout, CidBook.Entry, string>> ReadQf()
-        {
-            string info;
-            var readouts = CrcScreen.ReadReadouts(out info);
-            Log.Info("QF read: " + info);
-            var outp = new List<Tuple<QfReadout, CidBook.Entry, string>>();
-            foreach (var r in readouts)
-            {
-                string why;
-                outp.Add(Tuple.Create(r, cids.Learn(r, out why), why));
-            }
-            return outp;
-        }
-
-        void LegacyCommand(string raw)
-        {
-            int fl; string id;
-            if (CrcForward.Amend(raw, out fl, out id)) { AmendAltitude(fl, id); return; }
-            var cmd = CrcForward.Uplink(raw);
-            if (cmd == null) return;
-            Log.Info("CRC command forwarded: " + cmd);
-            if (!ready)
-            {
-                ShowResult(cmd, false, "EDST NOT READY");
-                return;
-            }
-            last.Text = "→ " + cmd;
-            last.Foreground = Theme.Yellow;
-            // mcaExecute is the EDST page's own MCA entry point: same parsing, auth, NO TRACK / NO CPDLC
-            // checks and feedback as typing the command into the EDST MCA.
-            var js =
-                "(function(c){var post=function(o){o.t='mca';o.cmd=c;window.chrome.webview.postMessage(JSON.stringify(o));};" +
-                "if(typeof mcaExecute!=='function'){post({ok:false,error:'EDST NOT READY'});return;}" +
-                "mcaExecute(c).then(function(r){post({ok:!!(r&&r.ok),error:(r&&r.error)||'',flid:(r&&r.flid)||''});})" +
-                ".catch(function(){post({ok:false,error:'SEND FAIL'});});})(" + Json.Write(cmd) + ");";
-            web.CoreWebView2.ExecuteScriptAsync(js);
-        }
-
-        // Plain "QZ <alt> <FLID or CID>" in CRC: set the EDST assigned altitude locally (saved like any EDST
-        // amendment, nothing sent). The next time the altitude menu is opened for that aircraft the new altitude
-        // is already selected, so one click on UPLINK sends it.
-        void AmendAltitude(int fl, string id)
-        {
-            var cmd = "QZ " + fl.ToString("000") + " " + id;
-            Log.Info("CRC amendment: " + cmd);
-            if (!ready) { ShowResult(cmd, false, "EDST NOT READY", true); return; }
-            var js =
-                "(function(fl,id){var post=function(o){o.t='amend';o.cmd='QZ '+('00'+fl).slice(-3)+' '+id;window.chrome.webview.postMessage(JSON.stringify(o));};" +
-                "if(typeof assigned!=='object'||typeof renderBoard!=='function'||typeof mcaFindAircraft!=='function'){post({ok:false,error:'EDST NOT READY'});return;}" +
-                "var a=mcaFindAircraft(id);" +
-                "if(!a){var L=(typeof displayList==='function'?displayList():[]).concat(liveFlights||[]);" +
-                "a=L.find(function(x){return x&&String(x.cid||'').toUpperCase()===id;})||null;}" +
-                "if(!a){post({ok:false,error:id.length<=3?'CID NOT KNOWN TO EDST - USE CALLSIGN':'NO TRACK'});return;}" +
-                "assigned[a.cs]=fl;window.__crcAsg=window.__crcAsg||{};window.__crcAsg[a.cs]=fl;" +
-                "try{persist();}catch(e){}renderBoard();post({ok:true,flid:a.cs});" +
-                "})(" + fl + "," + Json.Write(id) + ");";
-            web.CoreWebView2.ExecuteScriptAsync(js);
-        }
-
         void OnWebMessage(object sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
             try
             {
                 var o = Json.Parse(e.TryGetWebMessageAsString());
                 var t = Json.Str(o, "t");
-                if (t != "mca" && t != "amend" && t != "host") return;
+                if (t != "host") return;
                 var cmd = Json.Str(o, "cmd");
                 var action = Json.Str(o, "action") ?? "";
                 if (action == "ignored") { Log.Info("Ignored by EDST: " + cmd); return; }
@@ -625,7 +531,7 @@ namespace VusaLinkApp
                     Log.Info("Handoff marked " + cmd + " " + fac + " " + Json.Str(o, "freq"));
                     return;
                 }
-                bool amend = t == "amend" || action == "amend";
+                bool amend = action == "amend";
                 var flid = Json.Str(o, "flid");
                 if (amend && !string.IsNullOrEmpty(flid) && !cmd.EndsWith(" " + flid)) cmd += " (" + flid + ")";
                 ShowResult(cmd, Json.Bool(o, "ok") == true, Json.Str(o, "error"), amend);

@@ -10,6 +10,7 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
@@ -79,38 +80,91 @@ namespace VusaLinkApp
         public static List<QfReadout> ReadReadouts(out string info)
         {
             var all = new List<QfReadout>();
-            int wins = 0, lines = 0;
+            int wins = 0, lines = 0, zooms = 0;
+            // Debug: VUSALINK_QFDUMP=<folder>, or a "qfdump" folder next to the exe, saves every capture and its
+            // OCR text there.
+            var dump = Environment.GetEnvironmentVariable("VUSALINK_QFDUMP");
+            var local = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "qfdump");
+            if (string.IsNullOrEmpty(dump) && Directory.Exists(local)) dump = local;
+            var stamp = DateTime.Now.ToString("HHmmss_fff");
             foreach (var bmp in CaptureEramWindows())
                 using (bmp)
                 {
                     wins++;
-                    var l = Ocr(bmp).GetAwaiter().GetResult();
-                    lines += l.Length;
-                    all.AddRange(QfReadout.Parse(l));
+                    List<OcrText> l;
+                    int z;
+                    all.AddRange(ReadBitmap(bmp, out l, out z));
+                    lines += l.Count;
+                    zooms += z;
+                    if (!string.IsNullOrEmpty(dump))
+                        try
+                        {
+                            Directory.CreateDirectory(dump);
+                            bmp.Save(Path.Combine(dump, stamp + "_w" + wins + ".png"), ImageFormat.Png);
+                            File.WriteAllLines(Path.Combine(dump, stamp + "_w" + wins + ".txt"), l.Select(x => x.Text));
+                        }
+                        catch { }
                 }
             info = wins + " CRC window(s) captured, " + lines + " text line(s), " + all.Count + " QF readout(s)" +
-                (wins == 0 ? " (no CRC window found)" : "");
+                (zooms > 0 ? " (" + zooms + " zoomed look(s))" : "") + (wins == 0 ? " (no CRC window found)" : "");
             return all;
         }
 
-        // Windows OCR on light-on-black ERAM text: invert to dark-on-light first.
-        public static async Task<string[]> Ocr(Bitmap src)
+        public class OcrText { public string Text; public RectangleF Box; }
+
+        // Reads one window. At screen size OCR sometimes mangles the readout's first line ("493 N677PL*(12)" comes
+        // back as "493 12)") while the second line (beacon, speed, altitude) reads fine. So wherever a second line is
+        // found without a readout above it, that spot is cut out, enlarged and read again.
+        public static List<QfReadout> ReadBitmap(Bitmap bmp, out List<OcrText> lines, out int zooms)
+        {
+            zooms = 0;
+            lines = Ocr(bmp, 1).GetAwaiter().GetResult();
+            var texts = lines.Select(x => x.Text).ToArray();
+            var found = QfReadout.Parse(texts);
+            for (int i = 0; i < lines.Count && zooms < 3; i++)
+            {
+                if (!QfReadout.IsSecondLine(texts[i])) continue;
+                if (i > 0 && QfReadout.Parse(new[] { texts[i - 1], texts[i] }).Count > 0) continue;   // read fine
+                var b = lines[i].Box;
+                float h = Math.Max(8, b.Height);
+                var crop = Rectangle.Round(RectangleF.FromLTRB(b.Left - 2 * h, b.Top - 2.2f * h,
+                    Math.Max(b.Right, b.Left + 32 * h), b.Bottom + 0.6f * h));
+                crop.Intersect(new Rectangle(0, 0, bmp.Width, bmp.Height));
+                if (crop.Width < 20 || crop.Height < 10) continue;
+                zooms++;
+                using (var part = bmp.Clone(crop, bmp.PixelFormat))
+                    // OCR is touchy about text size (N677PL reads at 2x and 4x, not at 3x): try each until one works.
+                    foreach (var scale in new[] { 2, 3, 4 })
+                    {
+                        var more = QfReadout.Parse(Ocr(part, scale).GetAwaiter().GetResult().Select(x => x.Text).ToArray());
+                        foreach (var r in more)
+                            if (!found.Any(f => f.Key == r.Key)) found.Add(r);
+                        if (more.Count > 0) break;
+                    }
+            }
+            return found;
+        }
+
+        // Windows OCR on light-on-black ERAM text: invert to dark-on-light first (and enlarge by 'scale').
+        // Returns each line with its box in 'src' pixels.
+        public static async Task<List<OcrText>> Ocr(Bitmap src, int scale)
         {
             var eng = OcrEngine.TryCreateFromUserProfileLanguages()
                 ?? OcrEngine.TryCreateFromLanguage(new Windows.Globalization.Language("en-US"));
             if (eng == null) throw new InvalidOperationException("Windows OCR is not available (no OCR language installed)");
             byte[] png;
-            using (var inv = new Bitmap(src.Width, src.Height))
+            using (var inv = new Bitmap(src.Width * scale, src.Height * scale))
             {
                 using (var g = Graphics.FromImage(inv))
                 using (var ia = new ImageAttributes())
                 {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
                     ia.SetColorMatrix(new ColorMatrix(new[]
                     {
                         new float[] { -0.33f, -0.33f, -0.33f, 0, 0 }, new float[] { -0.33f, -0.33f, -0.33f, 0, 0 },
                         new float[] { -0.33f, -0.33f, -0.33f, 0, 0 }, new float[] { 0, 0, 0, 1, 0 }, new float[] { 1, 1, 1, 0, 1 }
                     }));
-                    g.DrawImage(src, new Rectangle(0, 0, src.Width, src.Height), 0, 0, src.Width, src.Height, GraphicsUnit.Pixel, ia);
+                    g.DrawImage(src, new Rectangle(0, 0, inv.Width, inv.Height), 0, 0, src.Width, src.Height, GraphicsUnit.Pixel, ia);
                 }
                 using (var ms = new MemoryStream()) { inv.Save(ms, ImageFormat.Png); png = ms.ToArray(); }
             }
@@ -121,7 +175,23 @@ namespace VusaLinkApp
             var dec = await AsTask(BitmapDecoder.CreateAsync(ras));
             var sbm = await AsTask(dec.GetSoftwareBitmapAsync());
             var res = await AsTask(eng.RecognizeAsync(sbm));
-            return res.Lines.Select(l => l.Text).ToArray();
+            var outp = new List<OcrText>();
+            foreach (var l in res.Lines)
+            {
+                float x0 = float.MaxValue, y0 = float.MaxValue, x1 = 0, y1 = 0;
+                foreach (var w in l.Words)
+                {
+                    var r = w.BoundingRect;
+                    x0 = Math.Min(x0, (float)r.X); y0 = Math.Min(y0, (float)r.Y);
+                    x1 = Math.Max(x1, (float)(r.X + r.Width)); y1 = Math.Max(y1, (float)(r.Y + r.Height));
+                }
+                outp.Add(new OcrText
+                {
+                    Text = l.Text,
+                    Box = x1 > 0 ? RectangleF.FromLTRB(x0 / scale, y0 / scale, x1 / scale, y1 / scale) : RectangleF.Empty
+                });
+            }
+            return outp;
         }
 
         // Awaits a WinRT async operation without the System.Runtime.WindowsRuntime extensions (which need the
@@ -156,13 +226,29 @@ namespace VusaLinkApp
             return Cid + " " + Callsign + "(" + Sector + ") " + Type + (Beacon != null ? " " + Beacon : "") + (Altitude != null ? " " + Altitude : "");
         }
 
+        public string Key { get { return Cid + " " + Callsign; } }
+
         // "151 SKW5646(32) E75L/L" (+ next line "6566 450 350 ..."). OCR reads ERAM's slashed zero as Ø/ø.
-        static readonly Regex Line1 = new Regex(@"^([0-9A-Z]{3})\s+([A-Z][A-Z0-9]{1,7})\s*\(\s*([0-9A-Z]{1,3})\s*\)\s*([A-Z0-9]{2,4}(?:/[A-Z0-9])?)?");
-        static readonly Regex Line2 = new Regex(@"^([0-7]{4})\s+(\d{2,4})\s+(\d{2,3}[A-Z0-9]*)\b");
+        // Not anchored to the start of the line: OCR sometimes joins other text on the same row in front of it.
+        // The callsign may come back split by a space ("DALI 146" for DAL1146: ERAM's narrow 1 leaves a gap), and
+        // may be followed by ERAM's "*" marker ("AAL343*(12)", which OCR may also read as X; see CidBook.LooksLike).
+        static readonly Regex Line1 = new Regex(@"(?:^|\s)([0-9A-Z]{3})\s+([A-Z][A-Z0-9]{0,7}(?:\s[A-Z0-9]{1,7})?)\s*\*?\s*\(\s*([0-9A-Z]{1,3})\s*\)\s*([A-Z0-9]{2,4}(?:/[A-Z0-9])?)?");
+        static readonly Regex Line2 = new Regex(@"(?:^|\s)([0-7]{4})\s+(\d{2,4})\s+(\d{2,3}[A-Z0-9]*)\b");
+        static readonly Regex AirlineFlight = new Regex(@"^([A-Z]{3})([0-9IO]*[0-9][0-9IO]*)$");
 
         public static string Clean(string s)
         {
             return (s ?? "").ToUpperInvariant().Replace('Ø', '0').Replace('ø', '0').Replace("( ", "(").Replace(" )", ")").Trim();
+        }
+
+        // The readout's second line: "<beacon> <speed> <altitude> <route>".
+        public static bool IsSecondLine(string line) { return Line2.IsMatch(Clean(line)); }
+
+        // Airline flight number: I and O there are OCR's 1 and 0 (DALI146 -> DAL1146, AALI0I0 -> AAL1010).
+        public static string FixFlightNumber(string cs)
+        {
+            var af = AirlineFlight.Match(cs ?? "");
+            return af.Success ? af.Groups[1].Value + af.Groups[2].Value.Replace('I', '1').Replace('O', '0') : cs;
         }
 
         public static List<QfReadout> Parse(string[] lines)
@@ -172,9 +258,12 @@ namespace VusaLinkApp
             {
                 var m = Line1.Match(Clean(lines[i]));
                 if (!m.Success || !m.Groups[1].Value.Any(char.IsDigit)) continue;
+                var cs = m.Groups[2].Value.Replace(" ", "");
+                if (cs.Length < 2 || cs.Length > 8) continue;
+                cs = FixFlightNumber(cs);
                 var r = new QfReadout
                 {
-                    Cid = m.Groups[1].Value, Callsign = m.Groups[2].Value,
+                    Cid = m.Groups[1].Value, Callsign = cs,
                     Sector = m.Groups[3].Value, Type = m.Groups[4].Value
                 };
                 if (i + 1 < lines.Length)
@@ -270,7 +359,7 @@ namespace VusaLinkApp
                 lock (sync)
                     foreach (var o in arr)
                     {
-                        var cid = Json.Str(o, "cid"); var cs = Json.Str(o, "callsign");
+                        var cid = Json.Str(o, "cid"); var cs = QfReadout.FixFlightNumber(Json.Str(o, "callsign"));
                         if (string.IsNullOrEmpty(cid) || string.IsNullOrEmpty(cs)) continue;
                         byCid[cid] = new Entry
                         {
@@ -312,6 +401,7 @@ namespace VusaLinkApp
         }
 
         // Returns a description of what was learned, or null if the readout was rejected (reason in 'why').
+        // On success 'why' says how the callsign was corrected, if it was.
         public Entry Learn(QfReadout r, out string why)
         {
             why = null;
@@ -328,12 +418,12 @@ namespace VusaLinkApp
             }
             else if (f.Count > 0)
             {
-                // OCR may have misread one character (W -> H ...): accept a unique one-character fix that also
+                // OCR misreads: look-alike characters (AALI0I0 for AAL1010), one other wrong character (W -> H),
+                // or a stray character after the callsign (JBU1055X). Accept only a unique flight that also
                 // agrees on type or beacon.
-                var fixes = f.Where(kv => kv.Key.Length == cs.Length && Diff(kv.Key, cs) == 1 && Agrees(r, kv.Value))
-                    .Select(kv => kv.Key).ToList();
-                if (fixes.Count == 1) { cs = fixes[0]; verified = true; }
-                else if (fixes.Count > 1) { why = "ambiguous callsign " + cs; return null; }
+                var fixes = f.Where(kv => LooksLike(cs, kv.Key) && Agrees(r, kv.Value)).Select(kv => kv.Key).ToList();
+                if (fixes.Count == 1) { why = "OCR " + cs + " -> " + fixes[0]; cs = fixes[0]; verified = true; }
+                else if (fixes.Count > 1) { why = "ambiguous callsign " + cs + " (" + string.Join("/", fixes) + ")"; return null; }
                 // Not on VATSIM at all (e.g. a test server): keep it unverified. The EDST still checks the callsign.
             }
             Pilot conn;
@@ -363,11 +453,32 @@ namespace VusaLinkApp
             return typeOk || beaconOk;
         }
 
-        static int Diff(string a, string b)
+        // Characters Windows OCR mixes up in ERAM's font.
+        static char Fold(char c)
         {
-            int d = 0;
-            for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) d++;
-            return d;
+            switch (c)
+            {
+                case 'I': case 'L': case '|': return '1';
+                case 'O': case 'Q': case 'D': return '0';
+                case 'S': return '5';
+                case 'B': return '8';
+                case 'Z': return '2';
+                case 'G': return '6';
+            }
+            return c;
+        }
+
+        // 'read' (OCR) could be 'real' (VATSIM callsign): same length with look-alikes free and at most one other
+        // difference, or the same plus one stray trailing character.
+        public static bool LooksLike(string read, string real)
+        {
+            if (read == real) return false;
+            if (read.Length == real.Length + 1) read = read.Substring(0, real.Length);
+            if (read.Length != real.Length) return false;
+            int other = 0;
+            for (int i = 0; i < read.Length; i++)
+                if (read[i] != real[i] && Fold(read[i]) != Fold(real[i]) && ++other > 1) return false;
+            return true;
         }
 
         void RefreshFeed()
@@ -402,6 +513,75 @@ namespace VusaLinkApp
                 lock (sync) feed = d;
             }
             catch (Exception ex) { Log.Info("CID book: VATSIM feed failed: " + ex.Message); }
+        }
+    }
+
+    // Reads CRC's Response Area after a QF (typed, or a middle-click on a data block) and learns the CID.
+    //
+    // CRC draws the readout a moment after the QF, and until then the previous QF's readout is still on screen.
+    // So the reader keeps looking (about every half second, for up to 3.5 s) until a readout appears that wasn't
+    // there on the last look, and learns that one. If the same aircraft is QF'd again, nothing new appears; the
+    // readout on screen is learned again when time runs out. A newer QF stops the older one's looking.
+    class QfReader
+    {
+        static readonly TimeSpan Window = TimeSpan.FromMilliseconds(3500);
+        readonly CidBook cids;
+        int gen;
+        HashSet<string> lastKeys = new HashSet<string>();   // readouts seen on the last look
+
+        public Func<bool> Enabled = () => true;
+        public event Action<QfReadout, CidBook.Entry> Learned;   // on the thread that called Trigger
+
+        public QfReader(CidBook cids) { this.cids = cids; }
+
+        public async void Trigger()
+        {
+            int g = Interlocked.Increment(ref gen);
+            var start = DateTime.UtcNow;
+            await Task.Delay(250);
+            for (int look = 1; g == gen && Enabled(); look++)
+            {
+                bool last = DateTime.UtcNow - start >= Window;
+                Tuple<QfReadout, CidBook.Entry> got;
+                try { got = await Task.Run(() => Look(look, last)); }
+                catch (Exception ex) { Log.Info("QF read failed: " + ex.Message); return; }
+                if (g != gen) return;
+                if (got != null) { if (Learned != null) Learned(got.Item1, got.Item2); return; }
+                if (last) { Log.Info("QF read: no new readout after " + look + " look(s)"); return; }
+                await Task.Delay(150);
+            }
+        }
+
+        // One look. Returns the readout to report, or null to keep looking. On the last look a readout that was
+        // already on screen counts too (the same aircraft QF'd again).
+        Tuple<QfReadout, CidBook.Entry> Look(int look, bool last)
+        {
+            string info;
+            var readouts = CrcScreen.ReadReadouts(out info);
+            var keys = new HashSet<string>(readouts.Select(r => r.Key));
+            var fresh = readouts.Where(r => !lastKeys.Contains(r.Key)).ToList();
+            Log.Info("QF read (look " + look + "): " + info + (readouts.Count > 0 ? ", " + fresh.Count + " new" : ""));
+            if (readouts.Count > 0) lastKeys = keys;
+            var use = fresh.Count > 0 ? fresh : last ? readouts : fresh;
+            Tuple<QfReadout, CidBook.Entry> top = null;
+            foreach (var r in use)
+            {
+                string why;
+                var e = cids.Learn(r, out why);
+                if (e != null)
+                {
+                    Log.Info("QF read: " + r + " -> CID " + r.Cid + " = " + e.Callsign +
+                        (why != null ? " (" + why + ")" : "") + (e.Verified ? "" : " (not on VATSIM, unverified)"));
+                    top = Tuple.Create(r, e);
+                }
+                else
+                {
+                    Log.Info("QF read rejected: " + r + " (" + why + ")");
+                    // A misread readout may read better on the next look.
+                    lastKeys.Remove(r.Key);
+                }
+            }
+            return top;
         }
     }
 }

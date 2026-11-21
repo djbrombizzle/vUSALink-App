@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Windows.Threading;
 
 namespace VusaLinkApp
@@ -16,6 +17,11 @@ namespace VusaLinkApp
     // modifiers from CRC's MCA with Backspaces and presses Enter itself, so CRC gets "QZ 240 DAL123" and
     // amends as usual. This only happens when the app knows exactly what's in CRC's MCA (no cursor keys,
     // Delete or Ctrl shortcuts were used on the line).
+    //
+    // Windows silently removes a low-level hook whose callback is ever too slow (about 1 s), after which the app
+    // would see nothing typed in CRC until restarted. So the hooks run on their own thread (a busy app window can't
+    // delay them), the callbacks never touch the disk or look up processes, and a watchdog puts the hooks back
+    // if Windows drops them anyway.
     class CrcSync : IDisposable
     {
         public event Action<string> CommandEntered;
@@ -29,7 +35,12 @@ namespace VusaLinkApp
         readonly StringBuilder buffer = new StringBuilder();
         readonly LowLevelKeyboardProc proc, mouseProc;
         IntPtr mouseHook = IntPtr.Zero;
-        readonly Dispatcher dispatcher;
+        readonly Dispatcher dispatcher;          // the app's UI thread: events and logging go there
+        Dispatcher hookDispatcher;               // the hooks' own thread
+        IntPtr module;
+        Timer watchdog;
+        volatile HashSet<uint> crcPids = new HashSet<uint>();   // refreshed by the watchdog, read by the hooks
+        int reinstalls;
         IntPtr hook = IntPtr.Zero;
         IntPtr lastHwnd = IntPtr.Zero;
         bool lastWasCrc;
@@ -64,29 +75,140 @@ namespace VusaLinkApp
 
         public void Start()
         {
-            if (hook != IntPtr.Zero) return;
+            if (hookDispatcher != null) return;
             LoadCrcKeys();
+            RefreshPids();
             using (var p = Process.GetCurrentProcess())
             using (var m = p.MainModule)
+                module = GetModuleHandle(m.ModuleName);
+            var started = new ManualResetEvent(false);
+            var th = new Thread(() =>
             {
-                var mod = GetModuleHandle(m.ModuleName);
-                hook = SetWindowsHookEx(WH_KEYBOARD_LL, proc, mod, 0);
-                mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, mod, 0);
-            }
-            if (hook == IntPtr.Zero) Log.Info("CRC sync: keyboard hook failed " + Marshal.GetLastWin32Error());
-            if (mouseHook == IntPtr.Zero) Log.Info("CRC sync: mouse hook failed " + Marshal.GetLastWin32Error());
+                hookDispatcher = Dispatcher.CurrentDispatcher;
+                InstallHooks();
+                started.Set();
+                Dispatcher.Run();   // the message loop the low-level hooks are called from
+            }) { IsBackground = true, Name = "CrcHooks" };
+            th.SetApartmentState(ApartmentState.STA);
+            th.Start();
+            started.WaitOne(5000);
+            watchdog = new Timer(_ => Watch(), null, 2000, 2000);
         }
 
-        public void Dispose()
+        // On the hooks' thread.
+        void InstallHooks()
+        {
+            Unhook();
+            hook = SetWindowsHookEx(WH_KEYBOARD_LL, proc, module, 0);
+            int e1 = Marshal.GetLastWin32Error();
+            mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, module, 0);
+            int e2 = Marshal.GetLastWin32Error();
+            if (hook == IntPtr.Zero) LogLater("CRC sync: keyboard hook failed " + e1);
+            if (mouseHook == IntPtr.Zero) LogLater("CRC sync: mouse hook failed " + e2);
+        }
+
+        void Unhook()
         {
             if (hook != IntPtr.Zero) UnhookWindowsHookEx(hook);
             if (mouseHook != IntPtr.Zero) UnhookWindowsHookEx(mouseHook);
             hook = mouseHook = IntPtr.Zero;
         }
 
+        // Every 2 s: refresh which processes are CRC, and check the hooks are still called. Every move of the mouse
+        // pointer passes through the mouse hook, so a pointer that moved over CRC with no mouse-hook call since the
+        // last check, twice in a row, means Windows has dropped the hooks: put them back. (Not "last input time":
+        // joysticks and USB push-to-talk buttons count as input but never pass through these hooks.)
+        void Watch()
+        {
+            try
+            {
+                RefreshPids();
+                if (hookDispatcher == null) return;
+                POINT pt;
+                if (!GetCursorPos(out pt)) return;
+                int calls = mouseCalls;
+                bool moved = pt.X != lastPt.X || pt.Y != lastPt.Y, silent = calls == lastCalls;
+                lastPt = pt; lastCalls = calls;
+                // Only judged while CRC is in front: input to an elevated window never reaches a non-admin hook,
+                // and an elevated CRC can't be helped by reinstalling (see CrcElevated).
+                uint pid;
+                GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+                if (!crcPids.Contains(pid) || CrcElevated || !moved || !silent) { suspect = 0; return; }
+                if (++suspect < 2) return;
+                suspect = 0;
+                reinstalls++;
+                if (reinstalls <= 5 || reinstalls % 50 == 0)
+                    LogLater("CRC sync: Windows stopped calling the keyboard/mouse hooks; reinstalling (" + reinstalls + ")");
+                hookDispatcher.BeginInvoke(new Action(InstallHooks));
+            }
+            catch (Exception ex) { LogLater("CRC sync: watchdog: " + ex.Message); }
+        }
+
+        POINT lastPt;
+        int lastCalls, suspect;
+        volatile int mouseCalls;   // mouse hook calls (pointer moves, clicks)
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct POINT { public int X, Y; }
+        [DllImport("user32.dll")]
+        static extern bool GetCursorPos(out POINT p);
+
+        void RefreshPids()
+        {
+            var ids = new HashSet<uint>();
+            foreach (var p in Process.GetProcessesByName(ProcessName)) { ids.Add((uint)p.Id); p.Dispose(); }
+            if (ids.SetEquals(crcPids)) return;
+            crcPids = ids;
+            lastHwnd = IntPtr.Zero;
+            bool elevated = ids.Any(HigherThanUs);
+            if (elevated != CrcElevated)
+                LogLater(elevated
+                    ? "CRC sync: CRC is running as administrator and this app isn't, so Windows hides what's typed in CRC from it. Start CRC normally, or run this app as administrator too"
+                    : "CRC sync: CRC runs at the same level as this app");
+            CrcElevated = elevated;
+        }
+
+        // CRC runs as administrator and this app doesn't (Windows' UIPI): no key or click in CRC reaches the hooks.
+        public volatile bool CrcElevated;
+
+        // True when this process can't read the other one's token: it runs at a higher integrity level (elevated).
+        static bool HigherThanUs(uint pid)
+        {
+            var h = OpenProcess(0x1000, false, pid);   // PROCESS_QUERY_LIMITED_INFORMATION
+            if (h == IntPtr.Zero) return false;
+            try
+            {
+                IntPtr tok;
+                if (OpenProcessToken(h, 0x0008, out tok)) { CloseHandle(tok); return false; }   // TOKEN_QUERY
+                return Marshal.GetLastWin32Error() == 5;   // ERROR_ACCESS_DENIED
+            }
+            finally { CloseHandle(h); }
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+        [DllImport("advapi32.dll", SetLastError = true)]
+        static extern bool OpenProcessToken(IntPtr h, uint access, out IntPtr token);
+        [DllImport("kernel32.dll")]
+        static extern bool CloseHandle(IntPtr h);
+
+        void LogLater(string s) { dispatcher.BeginInvoke(new Action(() => Log.Info(s))); }
+
+        public void Dispose()
+        {
+            if (watchdog != null) watchdog.Dispose();
+            var d = hookDispatcher;
+            if (d != null)
+            {
+                try { d.Invoke(new Action(Unhook)); } catch { }
+                d.InvokeShutdown();
+            }
+        }
+
         // Only middle-button presses in CRC matter (that's QF on a data block); nothing else is looked at.
         IntPtr MouseProc(int nCode, IntPtr wParam, IntPtr lParam)
         {
+            mouseCalls++;
             try
             {
                 if (nCode >= 0 && Enabled && wParam == (IntPtr)WM_MBUTTONDOWN && ReadoutLikely != null && CrcInForeground())
@@ -113,17 +235,11 @@ namespace VusaLinkApp
             var hwnd = GetForegroundWindow();
             if (hwnd == lastHwnd) return lastWasCrc;
             lastHwnd = hwnd;
-            lastWasCrc = false;
             uint pid;
             GetWindowThreadProcessId(hwnd, out pid);
-            try
-            {
-                using (var p = Process.GetProcessById((int)pid))
-                    lastWasCrc = string.Equals(p.ProcessName, ProcessName, StringComparison.OrdinalIgnoreCase);
-            }
-            catch { }
+            lastWasCrc = crcPids.Contains(pid);
             Reset();
-            if (lastWasCrc) Log.Info("CRC sync: CRC window focused (hwnd " + hwnd + ")");
+            if (lastWasCrc) LogLater("CRC sync: CRC window focused (hwnd " + hwnd + ")");
             return lastWasCrc;
         }
 
@@ -247,13 +363,13 @@ namespace VusaLinkApp
                     return false;
                 }
                 int erase = TrimForCrc != null ? TrimForCrc(raw) : 0;
-                if (Diagnose != null) Diagnose(raw, erase);
+                if (Diagnose != null) { var d = Diagnose; dispatcher.BeginInvoke(new Action(() => d(raw, erase))); }
                 if (CommandEntered != null) CommandEntered(cmd);
                 if (erase > 0)
                 {
                     // Let this hook call return first, then rewrite CRC's line.
                     dispatcher.BeginInvoke(new Action(() => SendKeys(0x08, erase, true)));
-                    Log.Info("CRC line trimmed by " + erase + " chars before Enter: " + cmd);
+                    LogLater("CRC line trimmed by " + erase + " chars before Enter: " + cmd);
                     return true;
                 }
                 if (erase < 0)
@@ -261,7 +377,7 @@ namespace VusaLinkApp
                     // A command only the EDST knows (UC): clear CRC's line instead of letting CRC reject it.
                     int all = raw.Length;
                     dispatcher.BeginInvoke(new Action(() => SendKeys(0x08, all, false)));
-                    Log.Info("CRC line cleared (EDST-only command): " + cmd);
+                    LogLater("CRC line cleared (EDST-only command): " + cmd);
                     return true;
                 }
                 return false;
