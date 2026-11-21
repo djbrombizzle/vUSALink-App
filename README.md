@@ -96,6 +96,7 @@ Type the callsign. The CRC function key works in place of typing the verb (it pu
 | `QS LT <hdg> <callsign> /U` / `QS RT <hdg> …` | type it | `TURN LEFT HEADING` / `TURN RIGHT HEADING` | `QS LT 090 DAL123 /U` |
 | `QS PH <callsign> /U` | type it | `FLY PRESENT HEADING` | `QS PH DAL123 /U` |
 | `QS /<kt> <callsign> /U` | type it | `MAINTAIN <kt>KT` (80–400 kt) | `QS /280 DAL123 /U` → `MAINTAIN 280KT` |
+| `QS /M.<nn> <callsign> /U` | type it | `MAINTAIN M.<nn>` (`/M80` works too) | `QS /M.80 DAL123 /U` → `MAINTAIN M.80` |
 
 **Altitudes:** `350`, `FL350` or `35000`, from FL010 to FL600. Below FL180 the pilot gets feet
 (`QZ 80 DAL123 /U` → `CLIMB AND MAINTAIN 8,000ft`). `QQ` also takes ERAM's interim prefixes (`QQ R110 …`).
