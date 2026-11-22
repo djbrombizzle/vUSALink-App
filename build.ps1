@@ -17,7 +17,7 @@ function Sources($dirs) { $dirs | ForEach-Object { Get-ChildItem (Join-Path $PSS
 & "$fw\csc.exe" /nologo /target:winexe /optimize+ /platform:x64 /warn:3 /codepage:65001 `
     "/out:$out\vUSALinkLite.exe" `
     "/r:$wpf\PresentationCore.dll" "/r:$wpf\PresentationFramework.dll" "/r:$wpf\WindowsBase.dll" `
-    "/r:$fw\System.Xaml.dll" /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
+    "/r:$fw\System.Xaml.dll" /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll `
     "/r:$fw\System.Runtime.dll" "/r:$fw\System.Runtime.WindowsRuntime.dll" "/r:$wm\Windows.Foundation.winmd" "/r:$wm\Windows.Media.winmd" `
     "/r:$wm\Windows.Graphics.winmd" "/r:$wm\Windows.Storage.winmd" "/r:$wm\Windows.Globalization.winmd" `
     (Sources 'Shared', 'Lite')
@@ -28,7 +28,7 @@ $src = Sources 'Shared', 'App'
 & "$fw\csc.exe" /nologo /target:winexe /optimize+ /platform:x64 /warn:3 /codepage:65001 `
     "/out:$out\vUSALinkApp.exe" `
     "/r:$wpf\PresentationCore.dll" "/r:$wpf\PresentationFramework.dll" "/r:$wpf\WindowsBase.dll" `
-    "/r:$fw\System.Xaml.dll" /r:System.dll /r:System.Core.dll /r:System.Drawing.dll `
+    "/r:$fw\System.Xaml.dll" /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll `
     "/r:$lib\Microsoft.Web.WebView2.Core.dll" "/r:$lib\Microsoft.Web.WebView2.Wpf.dll" `
     "/r:$fw\System.Runtime.dll" "/r:$fw\System.Runtime.WindowsRuntime.dll" "/r:$wm\Windows.Foundation.winmd" "/r:$wm\Windows.Media.winmd" `
     "/r:$wm\Windows.Graphics.winmd" "/r:$wm\Windows.Storage.winmd" "/r:$wm\Windows.Globalization.winmd" `

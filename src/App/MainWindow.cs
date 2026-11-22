@@ -129,9 +129,55 @@ namespace VusaLinkApp
             cidTimer.Tick += (s, e) => { if (cids.Count > 0) Task.Run(() => cids.Maintain()); };
             cidTimer.Start();
             Task.Run(() => cids.Maintain());
+            Log.Info("vUSALink App " + AppVersion.Current + " starting");
+            updateTimer.Tick += (s, e) => CheckForUpdate();
+            updateTimer.Start();
+            Loaded += (s, e) => CheckForUpdate();
         }
 
         readonly DispatcherTimer cidTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+
+        // ---------------------------------------------------------------- update (GitHub Releases)
+
+        StackPanel right;
+        Border btnUpdate;
+        UpdateInfo update;
+        bool updating;
+        readonly DispatcherTimer updateTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(6) };
+
+        async void CheckForUpdate()
+        {
+            if (updating) return;
+            var u = await Task.Run(() => Updater.Check("vUSALink-App-"));
+            if (u == null) return;
+            update = u;
+            ((TextBlock)btnUpdate.Child).Text = "UPDATE " + u.Tag;
+            btnUpdate.ToolTip = "vUSALink App " + u.Tag + " is available (this is v" + AppVersion.Current +
+                "). Click to download and install it; the app restarts in a few seconds. Settings and learned CIDs are kept.";
+            btnUpdate.Visibility = Visibility.Visible;
+        }
+
+        async void InstallUpdate()
+        {
+            if (update == null || updating) return;
+            updating = true;
+            var u = update;
+            ((TextBlock)btnUpdate.Child).Text = "UPDATING...";
+            SetStatus("DOWNLOADING " + u.Tag + "...", Theme.Amber);
+            var err = await Task.Run(() => Updater.Install(u, "vUSALinkApp.exe"));
+            if (err == null && Updater.Relaunch(Process.GetCurrentProcess().MainModule.FileName))
+            {
+                Close();
+                return;
+            }
+            updating = false;
+            ((TextBlock)btnUpdate.Child).Text = "UPDATE " + u.Tag;
+            SetStatus("UPDATE FAILED - STILL ON v" + AppVersion.Current, Theme.Amber);
+            if (MessageBox.Show(this, "Updating to " + u.Tag + " failed:\n\n" + (err ?? "couldn't restart the app") +
+                    "\n\nThe app keeps running the current version. Open the download page?", "vUSALink App update",
+                    MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes && u.PageUrl != null)
+                try { Process.Start(new ProcessStartInfo(u.PageUrl) { UseShellExecute = true }); } catch { }
+        }
 
         // ---------------------------------------------------------------- strip (top bar)
 
@@ -146,8 +192,14 @@ namespace VusaLinkApp
             DockPanel.SetDock(title, Dock.Left);
             dock.Children.Add(title);
 
-            var right = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 4, 0) };
+            right = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 4, 0) };
             DockPanel.SetDock(right, Dock.Right);
+            btnUpdate = Button("UPDATE", "", InstallUpdate);
+            btnUpdate.Visibility = Visibility.Collapsed;
+            btnUpdate.Background = Theme.Amber;
+            ((TextBlock)btnUpdate.Child).Foreground = Brushes.Black;
+            ((TextBlock)btnUpdate.Child).FontWeight = FontWeights.Bold;
+            right.Children.Add(btnUpdate);
             btnMirror = Button("CRC MIRROR", "Forward QZ / QQ / QU / QS commands with /U typed in CRC to the EDST MCA", ToggleMirror);
             btnCrcBar = Button("CRC BAR", "Switch the EDST page to its compact CRC layout (?crc=1)", ToggleCrcBar);
             btnTop = Button("ON TOP", "Keep this window above CRC", ToggleTop);

@@ -57,6 +57,22 @@ the app tells you where to get it.
 > **More info → Run anyway**, or build it yourself from this source. The hook only reads keys while a CRC window is in
 > the foreground. Keystrokes are never stored or sent anywhere, and only the commands below are passed to the EDST.
 
+### Updates
+
+From v0.3.4 the app checks GitHub for a newer release when it starts, and every 6 hours while it runs. If there is one,
+an amber **UPDATE vX.Y.Z** button appears at the left of the top bar. Click it: the app downloads the new zip,
+swaps its files and restarts, in a few seconds. vUSALink-Lite does the same from its tray menu (**Update to vX.Y.Z**)
+and shows a notification when an update is out. Nothing installs without your click, so it never restarts in the
+middle of a session on its own.
+
+- Settings and learned CIDs (`%LOCALAPPDATA%USALinkApp`) are kept.
+- If anything goes wrong, the old files are put back and the app keeps running the version you had. The app then
+  offers the download page.
+- The app has to be able to write to its own folder. Under `Program Files` it can't, so update by hand there, or
+  move the app to a folder you own.
+- No internet, or GitHub unreachable: no button, the app starts as usual.
+- Versions before v0.3.4 can't update themselves. Download v0.3.4 or later by hand once.
+
 ## What it does
 
 - **The full EDST:** ACL, DEP, GPD, PLANS, WX, SIG/NOT, GI, CPDLC ADV / HIST / MSGOUT, the MCA, everything the web EDST has.
@@ -306,7 +322,8 @@ bin\vUSALinkApp.exe
 
 `lib\` holds Microsoft's WebView2 SDK DLLs from the `Microsoft.Web.WebView2` NuGet package (1.0.4314.35, signed by
 Microsoft, see `lib\WebView2-LICENSE.txt`). GitHub Actions builds every push. Pushing a tag such as `v0.2.0` publishes a
-Release with the zip.
+Release with the zips. Before tagging, set `AppVersion.Current` in `src/Shared/Updater.cs` to the same version
+(CI refuses a tag that doesn't match, since the update check compares the two).
 
 Debug switches (environment variables):
 
@@ -318,6 +335,8 @@ Debug switches (environment variables):
 | `VUSALINK_PROBE=<seconds>` | Log when the page refreshes traffic |
 | `VUSALINK_CRC_PROCESS=<name>` | Treat another process as CRC (for testing mirroring without CRC) |
 | `VUSALINK_QFREAD=1` | Read CRC's Response Area once at start-up, as after a QF |
+| `VUSALINK_FAKE_VERSION=<x.y.z>` | Pretend to be that version (to test updating: it offers the latest release) |
+| `VUSALINK_UPDATE_SELFTEST=1` | vUSALink-Lite only: install an available update straight away, without a click |
 | `VUSALINK_QFDUMP=<folder>` | Save every capture of CRC taken after a QF, and the text OCR read from it, to that folder. A `qfdump` folder next to the exe does the same. Captures show all of CRC's windows, so delete them afterwards |
 
 `build.ps1 -Out <folder>` builds into another folder, for example while the app in `bin\` is running.

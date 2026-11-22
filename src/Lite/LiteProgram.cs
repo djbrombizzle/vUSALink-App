@@ -16,12 +16,13 @@ namespace VusaLinkApp
     // the EDST page open in a CRC browser tab (or any browser) over a local link (see LinkServer).
     static class LiteProgram
     {
-        public const string Version = "0.3.3";
+        public const string Version = AppVersion.Current;
 
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            Updater.AfterStart(args);
             bool first;
             using (var single = new Mutex(true, @"Local\vUSALink.Lite", out first))
             {
@@ -53,7 +54,11 @@ namespace VusaLinkApp
         readonly DispatcherTimer statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         readonly DispatcherTimer cidTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         Forms.NotifyIcon tray;
-        Forms.ToolStripMenuItem miCrc, miEdst, miLast, miMirror, miStartup;
+        Forms.ToolStripMenuItem miCrc, miEdst, miLast, miMirror, miStartup, miUpdate;
+        readonly DispatcherTimer updateTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(6) };
+        UpdateInfo update;
+        string notifiedUpdate;
+        bool updating;
         bool mirrorOwned, mirrorOn = true, warnedElevated;
         QfReader qf;
         string lastText = "";
@@ -105,6 +110,48 @@ namespace VusaLinkApp
             statusTimer.Start();
             UpdateStatus();
             SelfTest();
+            // Lite often runs for days (Start with Windows), so check at start and every 6 hours.
+            updateTimer.Tick += (s, e) => CheckForUpdate();
+            updateTimer.Start();
+            CheckForUpdate();
+        }
+
+        // ---------------------------------------------------------------- update
+
+        async void CheckForUpdate()
+        {
+            if (updating) return;
+            var u = await Task.Run(() => Updater.Check("vUSALink-Lite-"));
+            if (u == null) return;
+            update = u;
+            miUpdate.Text = "Update to " + u.Tag + " (restarts Lite)";
+            miUpdate.Visible = true;
+            if (notifiedUpdate != u.Tag)
+            {
+                notifiedUpdate = u.Tag;
+                Notify("vUSALink-Lite " + u.Tag + " is available. Click the tray icon → Update.", false);
+            }
+            // Debug: VUSALINK_UPDATE_SELFTEST=1 installs it right away (with VUSALINK_FAKE_VERSION, to test updating).
+            if (Environment.GetEnvironmentVariable("VUSALINK_UPDATE_SELFTEST") == "1" && !Updater.JustUpdated) InstallUpdate();
+        }
+
+        async void InstallUpdate()
+        {
+            if (update == null || updating) return;
+            updating = true;
+            miUpdate.Enabled = false;
+            miUpdate.Text = "Updating to " + update.Tag + "...";
+            var u = update;
+            var err = await Task.Run(() => Updater.Install(u, "vUSALinkLite.exe"));
+            if (err == null && Updater.Relaunch(Process.GetCurrentProcess().MainModule.FileName))
+            {
+                System.Windows.Application.Current.Shutdown();
+                return;
+            }
+            updating = false;
+            miUpdate.Enabled = true;
+            miUpdate.Text = "Update to " + u.Tag + " (restarts Lite)";
+            Notify("Update to " + u.Tag + " failed: " + (err ?? "couldn't restart") + ". Lite keeps running the old version. You can download it from GitHub instead.", true);
         }
 
         // Debug: VUSALINK_LITE_SELFTEST="line1|line2|..." runs each line through exactly what happens on Enter in
@@ -201,9 +248,11 @@ namespace VusaLinkApp
             var open = new Forms.ToolStripMenuItem("Open EDST in browser", null, (s, e) => OpenUrl(EdstUrl));
             var logItem = new Forms.ToolStripMenuItem("Show log", null, (s, e) => { try { Process.Start(new ProcessStartInfo(Log.File_) { UseShellExecute = true }); } catch { } });
             var exit = new Forms.ToolStripMenuItem("Exit", null, (s, e) => System.Windows.Application.Current.Shutdown());
+            miUpdate = new Forms.ToolStripMenuItem("Update", null, (s, e) => InstallUpdate()) { Visible = false, ForeColor = Color.DarkOrange };
+            miUpdate.Font = new Font(miUpdate.Font, FontStyle.Bold);
             menu.Items.AddRange(new Forms.ToolStripItem[]
             {
-                title, new Forms.ToolStripSeparator(), miCrc, miEdst, miLast, new Forms.ToolStripSeparator(),
+                title, miUpdate, new Forms.ToolStripSeparator(), miCrc, miEdst, miLast, new Forms.ToolStripSeparator(),
                 miMirror, miStartup, open, logItem, new Forms.ToolStripSeparator(), exit
             });
             tray = new Forms.NotifyIcon { Icon = MakeIcon(), Visible = true, ContextMenuStrip = menu, Text = "vUSALink-Lite" };

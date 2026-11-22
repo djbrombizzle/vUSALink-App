@@ -18,6 +18,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check the version matches the tag
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          # The app's update check compares AppVersion.Current with the latest release tag: if they differ,
+          # everyone on this release would be offered an "update" to it forever.
+          $m = Select-String -Path src/Shared/Updater.cs -Pattern 'Current = "([0-9.]+)"'
+          $v = $m.Matches[0].Groups[1].Value
+          if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "AppVersion.Current is $v but the tag is $env:GITHUB_REF_NAME" }
+
       - name: Build (Windows' built-in .NET Framework compiler)
         shell: pwsh
         run: ./build.ps1
