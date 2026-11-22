@@ -149,7 +149,8 @@ Voice remains primary. If ATC instructs you by voice, follow voice.
    with VATSIM. The chip then shows your CID and name.
 2. Connect to VATSIM on your position. The hub finds your position, ARTCC and voice frequency from the live VATSIM
    data. You can't pick an ARTCC yourself. It can take up to about 30 seconds after you connect.
-3. **Verify your position** (once per device; it lasts 30 days). The hub uses one of two methods:
+3. **Verify your position** (once per device; it lasts 30 days). Until you do, a bar under the toolbar shows what to
+   do. The hub uses one of two methods:
    - **vNAS:** be logged in to vNAS (CRC) on the same CID, active on that position (not as an observer).
    - **Code:** put the code shown (for example `VUSA-AB12K`) anywhere in your VATSIM controller info / ATIS, wait about
      30 seconds, then you can remove it.
@@ -176,7 +177,7 @@ You can only be signed in from **one place at a time** per CID. A second browser
 | Button | What it does |
 |---|---|
 | **↓ / MORE** | Shows a second row: **WIND** (winds aloft), **ALTIM SET** (altimeters), **MCA** (jumps to the MCA). |
-| **ACL** | The Aircraft List (always shown). |
+| **ACL nn** | The Aircraft List and how many aircraft are on it. Click to close the Departure List. |
 | **DEP** | Departure List (10.1). The number is the count of proposed departures. |
 | **GPD** | Graphical Plan Display: a map of your traffic, routes and conflicts (10.2). |
 | **WX REPORT** | METARs (10.5). |
@@ -192,7 +193,9 @@ You can only be signed in from **one place at a time** per CID. A second browser
 | **CRC** | Switches to the compact CRC layout (5.4). |
 | **⧉** | Copies the CRC-layout link, for adding the EDST as a CRC browser tab. |
 
-PLANS, UA, KEEP ALL, NON-ADSB, STATUS, OUTAGE and SAT COMM are shown for the ERAM look but don't do anything yet.
+**SAT COMM** is lit while the CPDLC (KUSA hub) connection is up. **ACL** shows how many aircraft are on the list;
+clicking it closes the Departure List. PLANS, UA, KEEP ALL, NON-ADSB, STATUS and OUTAGE are shown for the ERAM look
+and say "coming soon".
 
 ### 5.2 Aircraft List toolbar
 
@@ -249,7 +252,7 @@ From left to right:
 | **Type** | Aircraft type. | |
 | **Alt.** | Present altitude, then the assigned altitude in white when there is one. **Green underline:** awaiting WILCO. **Red underline:** no reply after 2 minutes. | Opens the **ALT** menu. A red underline: acknowledge it. |
 | **Code** | Current squawk. If the flight plan's assigned code differs, it follows in **amber underline**. | The amber code: uplinks `SQUAWK nnnn` straight away. Elsewhere: the **CODE** menu. |
-| **Hdg / Spd** | Heading and **ground speed**. An assigned heading or speed shows while it awaits WILCO. | Heading: **HDG** menu. Speed: **SPD** menu. |
+| **Hdg / Spd** | Live heading and **ground speed**, then the assigned heading or speed in white when there is one (`H270`, `280`, `M.79`), underlined while it awaits WILCO. A direct or new route ends an assigned heading; RESUME NORMAL SPEED ends an assigned speed; UNABLE removes either. | Heading: **HDG** menu. Speed: **SPD** menu. |
 | **Route** | Departure, route, destination. Underlined while a route, direct, crossing, hold or clearance awaits WILCO. | Opens the **ROUTE** menu. |
 
 - Click elsewhere on a row to select it (teal); click again to deselect. Many menus and the MCA act on the selected
@@ -277,7 +280,8 @@ Every menu can be dragged by its title and closes with X or a click outside it. 
   (`CLIMB AND MAINTAIN 8,000ft`).
 - **PD**, **TFC** and the ▼ reasons: as above.
 - **LOCAL TALT:** adds the destination altimeter (on automatically below FL180).
-- **BLOCK / TO:** a block altitude (`MAINTAIN BLOCK FL240 TO FL260`).
+- **BLOCK / TO:** a block altitude (`MAINTAIN BLOCK FL240 TO FL260`). Block altitudes are sent by CPDLC only: they
+  can't be typed in the MCA, and aren't typed into CRC.
 - **TEMP:** marks it as a temporary (interim) altitude. The CPDLC message is the same; CRC gets `QQ` instead of `QZ`.
 - **X RES:** crossing restriction (7.3).
 - If you typed `QZ 350 <callsign>` in the MCA or CRC (without `/U`), the menu opens with 350 already selected, ready
@@ -367,7 +371,7 @@ The **MCA** box sits at the bottom left (drag it anywhere; it remembers where). 
 
 | Command | Sends |
 |---|---|
-| `QZ 350 AAL123 /U` | Altitude: `CLIMB TO AND MAINTAIN FL350` (or descend / maintain). `350`, `FL350` and `35000` all work. |
+| `QZ 350 AAL123 /U` | Altitude: `CLIMB TO AND MAINTAIN FL350` (or descend / maintain). `350`, `FL350` and `35000` all work. Block altitudes (`240B260`) aren't accepted: use the ALT menu. |
 | `QZ 350 AAL123` (no /U) | **Nothing.** Records the altitude in the EDST only, and the ALT menu opens with it selected. |
 | `QQ 350 AAL123 /U` | Temporary altitude (same CPDLC message as QZ). |
 | `QU LUNNI AAL123 /U` | `PROCEED DIRECT TO LUNNI` |
@@ -543,7 +547,7 @@ The EDST then shows the CID to the left of the callsign, and `(sector)` when ano
 
   | EDST | Typed into CRC |
   |---|---|
-  | Altitude | `QZ 350 AAL123` (block `QZ 240B260`; TEMP → `QQ`) |
+  | Altitude | `QZ 350 AAL123` (TEMP → `QQ`; block altitudes aren't typed) |
   | CODE | `QB 4521 AAL123` |
   | Heading | `QS 270 AAL123` |
   | Speed (knots) | `QS /280 AAL123` |

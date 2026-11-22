@@ -229,7 +229,7 @@ DAL123 direct LUNNI from the route menu types `QU LUNNI DAL123` into CRC's MCA a
 
 | Sent from the EDST | Typed into CRC |
 |---|---|
-| Altitude (ALT menu or `QZ … /U`), block altitude | `QZ 350 DAL123`, `QZ 240B260 DAL123` |
+| Altitude (ALT menu or `QZ … /U`) | `QZ 350 DAL123` (block altitudes aren't typed into CRC) |
 | Temporary altitude (ALT menu with **TEMP**, or `QQ … /U`) | `QQ 110 DAL123` |
 | Code (CODE menu) | `QB 3456 DAL123` |
 | Heading (HDG menu, LT/RT too, or `QS … /U`) | `QS 270 DAL123` |
