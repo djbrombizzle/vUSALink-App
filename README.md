@@ -5,6 +5,9 @@ without the window, for controllers who keep the EDST in a CRC browser tab (see 
 (`https://vatflow.io/vusalink/edst/`) in its own window and connects it to CRC. You can amend an altitude or send a
 CPDLC uplink by typing the command in CRC, without typing it again in the EDST.
 
+> 📖 **New to the vUSAlink EDST?** The **[vUSAlink EDST Manual](MANUAL.md)** covers the whole system: how CPDLC
+> reaches pilots through KUSA, signing in and verifying, every column, menu and MCA command, and working from CRC.
+
 The EDST is loaded live, so every update to VATFLOW's EDST shows up in the app without a new download.
 CRC itself is never changed: the app doesn't read or write CRC's files or connect to vNAS.
 
