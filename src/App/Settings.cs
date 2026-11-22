@@ -19,6 +19,7 @@ namespace VusaLinkApp
         public bool CrcBar;           // load the page with ?crc=1 (EDST's compact CRC companion layout)
         public bool Mirror = true;    // forward "/U" commands typed in CRC to the EDST MCA
         public bool Topmost;
+        public bool Echo;             // type EDST uplinks into CRC as ERAM commands (CRC ECHO), off by default
         public double Zoom = 1.0;
         public double Left = double.NaN, Top = double.NaN, Width = 1400, Height = 860;
         public bool Maximized;
@@ -38,6 +39,7 @@ namespace VusaLinkApp
                 s.CrcBar = Bool(d, "CrcBar", s.CrcBar);
                 s.Mirror = Bool(d, "Mirror", s.Mirror);
                 s.Topmost = Bool(d, "Topmost", s.Topmost);
+                s.Echo = Bool(d, "CrcEcho", s.Echo);
                 s.Zoom = Num(d, "Zoom", s.Zoom);
                 s.Left = Num(d, "Left", s.Left);
                 s.Top = Num(d, "Top", s.Top);
@@ -76,6 +78,7 @@ namespace VusaLinkApp
                     "CrcBar=" + CrcBar,
                     "Mirror=" + Mirror,
                     "Topmost=" + Topmost,
+                    "CrcEcho=" + Echo,
                     "Zoom=" + Zoom.ToString(c),
                     "Left=" + Left.ToString(c),
                     "Top=" + Top.ToString(c),

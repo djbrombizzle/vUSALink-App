@@ -41,7 +41,8 @@ namespace VusaLinkApp
         readonly CidBook cids = new CidBook();
         readonly QfReader qf;
         readonly DispatcherTimer crcTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-        Border btnMirror, btnCrcBar, btnTop;
+        Border btnMirror, btnCrcBar, btnTop, btnEcho;
+        bool mirrorOwned;            // this app watches CRC (not vUSALink-Lite)
         CoreWebView2Environment env;
         bool ready, retryPending;
         int apiVersion;              // vUSALinkEDST host API version on the loaded page (0 = older page)
@@ -109,7 +110,8 @@ namespace VusaLinkApp
                 }));
             };
             sync.CommandEntered += cmd => Dispatcher.BeginInvoke(new Action(() => OnCrcCommand(cmd)));
-            if (CrcMirrorLock.TryAcquire()) sync.Start();
+            mirrorOwned = CrcMirrorLock.TryAcquire();
+            if (mirrorOwned) sync.Start();
             else
             {
                 // vUSALink-Lite is already watching CRC; two watchers would trim CRC's line twice.
@@ -149,12 +151,14 @@ namespace VusaLinkApp
             btnMirror = Button("CRC MIRROR", "Forward QZ / QQ / QU / QS commands with /U typed in CRC to the EDST MCA", ToggleMirror);
             btnCrcBar = Button("CRC BAR", "Switch the EDST page to its compact CRC layout (?crc=1)", ToggleCrcBar);
             btnTop = Button("ON TOP", "Keep this window above CRC", ToggleTop);
+            btnEcho = Button("CRC ECHO", "Type uplinks sent from the EDST into CRC as ERAM commands (QU/QZ/QQ/QS), so CRC matches", ToggleEcho);
+            right.Children.Add(btnEcho);
             right.Children.Add(btnMirror);
             right.Children.Add(btnCrcBar);
             right.Children.Add(btnTop);
             right.Children.Add(Button("−", "Zoom out (Ctrl+-)", () => SetZoom(web.ZoomFactor - 0.1)));
             right.Children.Add(Button("+", "Zoom in (Ctrl+=)", () => SetZoom(web.ZoomFactor + 0.1)));
-            right.Children.Add(Button("RELOAD", "Reload EDST (F5)", Navigate));
+            right.Children.Add(Button("RELOAD", "Reload EDST, fetching the latest page (not a cached copy)", HardReload));
             right.Children.Add(Button("BROWSER", "Open this EDST page in your web browser", OpenInBrowser));
             dock.Children.Add(right);
 
@@ -211,6 +215,7 @@ namespace VusaLinkApp
             SetOn(btnMirror, cfg.Mirror);
             SetOn(btnCrcBar, cfg.CrcBar);
             SetOn(btnTop, cfg.Topmost);
+            SetOn(btnEcho, cfg.Echo);
         }
 
         void SetStatus(string text, Brush color)
@@ -290,6 +295,16 @@ namespace VusaLinkApp
             web.CoreWebView2.Navigate(u);
         }
 
+        // RELOAD: drop cached files first, so an EDST update on vatflow shows up straight away (GitHub Pages lets
+        // a page be cached for 10 minutes). Only the file cache is cleared: sign-in and EDST settings stay.
+        async void HardReload()
+        {
+            if (!ready) return;
+            try { await web.CoreWebView2.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache); }
+            catch (Exception ex) { Log.Info("Cache clear failed: " + ex.Message); }
+            Navigate();
+        }
+
         async void OnNavigated(object sender, CoreWebView2NavigationCompletedEventArgs e)
         {
             var core = web.CoreWebView2;
@@ -298,6 +313,12 @@ namespace VusaLinkApp
                 SetStatus(Short(core.Source), Theme.Dim);
                 apiVersion = await DetectHostApi();
                 if (apiVersion >= 2) PushCids();
+                if (apiVersion >= 3) RegisterHost();
+                else if (cfg.Echo && apiVersion > 0 && IsEdstPage(core.Source))
+                {
+                    last.Text = "CRC ECHO NEEDS THE NEWER EDST PAGE (HOST API 3) - PRESS RELOAD";
+                    last.Foreground = Theme.Amber;
+                }
                 if (apiVersion < 1 && IsEdstPage(core.Source))
                     SetStatus("EDST HOST API NOT FOUND - CRC MIRRORING PAUSED (RELOAD, OR UPDATE THE EDST PAGE)", Theme.Amber);
                 var snap = Environment.GetEnvironmentVariable("VUSALINK_SNAPSHOT");
@@ -517,6 +538,7 @@ namespace VusaLinkApp
             {
                 var o = Json.Parse(e.TryGetWebMessageAsString());
                 var t = Json.Str(o, "t");
+                if (t == "crcEcho") { EchoToCrc(Json.Str(o, "text"), Json.Bool(o, "amend") == true); return; }
                 if (t != "host") return;
                 var cmd = Json.Str(o, "cmd");
                 var action = Json.Str(o, "action") ?? "";
@@ -549,6 +571,85 @@ namespace VusaLinkApp
                 ? (ok ? "Assigned altitude updated in EDST only - nothing sent to the pilot yet" : "EDST not updated")
                 : ok ? forwarded + " CRC command(s) uplinked this session" : "Not sent - see the EDST MCA for details";
             Log.Info((amend ? "Amend result " : "Forward result ") + cmd + " ok=" + ok + " " + error);
+        }
+
+        // ---------------------------------------------------------------- CRC ECHO (EDST -> CRC)
+
+        // Host API v3: ask the page to tell the app about uplinks sent from the EDST (vUSALinkEDST.setHost). The page
+        // sends {t:'crcEcho', text:'QU LUNNI DAL123'} once an uplink has gone out; CRC's own commands aren't echoed.
+        async void RegisterHost()
+        {
+            try
+            {
+                var r = await web.CoreWebView2.ExecuteScriptAsync(
+                    "(window.vUSALinkEDST&&vUSALinkEDST.setHost)?vUSALinkEDST.setHost({crcEcho:true}):false");
+                Log.Info("Host registered with EDST (CRC echo): " + r);
+            }
+            catch (Exception ex) { Log.Info("Host register failed: " + ex.Message); }
+        }
+
+        Task echoChain = Task.FromResult(0);   // lines are typed one at a time, in order
+
+        // amend: the EDST's AMEND button (an explicit "put this in CRC"), typed even with CRC ECHO off. Otherwise
+        // an uplink's copy, typed only with CRC ECHO on.
+        void EchoToCrc(string text, bool amend)
+        {
+            text = (text ?? "").Trim().ToUpperInvariant();
+            if (text == "") return;
+            if (!cfg.Echo && !amend) { Log.Info("CRC echo off, not typed: " + text); return; }
+            echoChain = echoChain.ContinueWith(_ => Dispatcher.InvokeAsync(() => EchoOne(text)).Task.Unwrap()).Unwrap();
+        }
+
+        async Task EchoOne(string text)
+        {
+            string why = null;
+            if (!mirrorOwned) why = "vUSALink-Lite IS WATCHING CRC";
+            else if (Process.GetProcessesByName(sync.ProcessName).Length == 0) why = "CRC NOT RUNNING";
+            else if (sync.CrcElevated) why = "CRC RUNS AS ADMIN";
+            // Characters you typed in CRC and haven't entered: don't mix into your command. If the app is only unsure
+            // what the line holds (a click or key it can't follow), it clears the line with Esc first.
+            else if (sync.CrcLineTyped) why = "CRC'S MCA HAS TEXT";
+            var lineInfo = sync.CrcLineInfo;
+            bool clear = sync.CrcLineUnsure;
+            IntPtr target = IntPtr.Zero;
+            string how = "";
+            if (why == null)
+            {
+                target = CrcType.FindTarget(sync.LastCrcWindow, sync.ProcessName, out how);
+                if (target == IntPtr.Zero) why = "NO ERAM WINDOW";
+            }
+            if (why == null)
+            {
+                var back = CrcType.Foreground();
+                why = await CrcType.TypeLine(target, text, back, clear);
+                if (why == null) sync.LineSentByApp();
+                Log.Info("CRC echo: [" + text + "] -> '" + CrcType.Title(target) + "' [" + how + "] " + (why ?? "typed") +
+                    " (CRC line was " + lineInfo + (clear ? ", cleared with Esc first" : "") + ")");
+            }
+            else Log.Info("CRC echo: [" + text + "] not typed: " + why + " (CRC line " + lineInfo + ")");
+            if (why == null)
+            {
+                last.Text = "\u21e2 CRC: " + text;
+                last.Foreground = Theme.Teal;
+                last.ToolTip = "Typed into CRC's ERAM MCA so CRC matches the uplink sent from the EDST";
+            }
+            else
+            {
+                last.Text = "\u2717 NOT SENT TO CRC (" + why + "): " + text;
+                last.Foreground = Theme.Amber;
+                last.ToolTip = "The uplink went out; only the CRC copy wasn't typed. Type it in CRC yourself if you want CRC to match.";
+            }
+        }
+
+        void ToggleEcho()
+        {
+            cfg.Echo = !cfg.Echo;
+            RefreshButtons(); cfg.Save();
+            if (cfg.Echo && apiVersion > 0 && apiVersion < 3)
+            {
+                last.Text = "CRC ECHO NEEDS THE NEWER EDST PAGE (HOST API 3) - RELOAD";
+                last.Foreground = Theme.Amber;
+            }
         }
 
         // ---------------------------------------------------------------- toggles / keys

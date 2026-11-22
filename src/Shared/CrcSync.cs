@@ -238,9 +238,40 @@ namespace VusaLinkApp
             uint pid;
             GetWindowThreadProcessId(hwnd, out pid);
             lastWasCrc = crcPids.Contains(pid);
-            Reset();
-            if (lastWasCrc) LogLater("CRC sync: CRC window focused (hwnd " + hwnd + ")");
+            // What's on CRC's MCA line stays there while you work in another program (the EDST, say), so the buffer
+            // is kept; it starts over only in a different CRC window, which has its own MCA.
+            if (lastWasCrc && hwnd != LastCrcWindow)
+            {
+                Reset();
+                LastCrcWindow = hwnd;
+                LogLater("CRC sync: CRC window focused (hwnd " + hwnd + ")");
+            }
             return lastWasCrc;
+        }
+
+        // The CRC window used most recently (where its MCA input goes).
+        public volatile IntPtr LastCrcWindow;
+
+        // What the app knows about CRC's MCA line (for CRC echo, which types into it):
+        //   Typed:  characters the app saw you type there and you haven't entered yet. Leave the line alone.
+        //   Unsure: a key or click (arrows, Ctrl+key, aircraft select, a click while typing) may have changed the line,
+        //           which happens in everyday use. Clear it with Esc before typing.
+        public bool CrcLineTyped { get { return buffer.Length > 0 && !dirty; } }
+        public bool CrcLineUnsure { get { return dirty; } }
+        public string CrcLineInfo
+        {
+            get
+            {
+                return dirty ? "unsure (" + (DirtyReason ?? "?") + ")" + (buffer.Length > 0 ? ", " + buffer.Length + " chars seen" : "")
+                    : buffer.Length == 0 ? "empty" : buffer.Length + " chars typed";
+            }
+        }
+
+        // The app typed a whole line + Enter into CRC (its keys are ignored by the hook): CRC's line is empty again.
+        public void LineSentByApp()
+        {
+            var d = hookDispatcher;
+            if (d != null) d.BeginInvoke(new Action(Reset));
         }
 
         // CRC's own key bindings (from %LOCALAPPDATA%\CRC\GeneralSettings.json): push-to-talk keys type nothing in

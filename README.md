@@ -21,6 +21,7 @@ It talks to the page through one small, stable host API (see [How the app talks 
 | What you download | `vUSALink-App-vX.Y.Z.zip` (exe + 3 DLLs) | `vUSALink-Lite-vX.Y.Z.zip` (one small exe) |
 | Runs as | A window | An icon in the system tray, no window |
 | CRC mirroring, `/U` trim, UC, handoffs, CIDs from QF | Yes | Yes, the same code |
+| CRC ECHO (EDST uplinks typed into CRC) | Yes | Not yet |
 
 Use one or the other. If both are running, only the first one started watches CRC, so a command is never handled twice.
 
@@ -201,16 +202,64 @@ SKW5646. CRC keeps its own line with the CID.
 - **CRC CIDs the app hasn't seen a QF for.** QF the aircraft once (see above), or type the callsign.
 - **CRC dot-aliases, data block work and everything else.** Ignored.
 
+## CRC ECHO: EDST uplinks typed into CRC
+
+The other direction. With **CRC ECHO** on (top bar, off by default), an uplink you send from the EDST is also
+typed into CRC as the matching ERAM command, so CRC's data block matches what the pilot was told. For example,
+DAL123 direct LUNNI from the route menu types `QU LUNNI DAL123` into CRC's MCA and presses Enter.
+
+| Sent from the EDST | Typed into CRC |
+|---|---|
+| Altitude (ALT menu or `QZ … /U`), block altitude | `QZ 350 DAL123`, `QZ 240B260 DAL123` |
+| Temporary altitude (ALT menu with **TEMP**, or `QQ … /U`) | `QQ 110 DAL123` |
+| Code (CODE menu) | `QB 3456 DAL123` |
+| Heading (HDG menu, LT/RT too, or `QS … /U`) | `QS 270 DAL123` |
+| Speed in knots (SPD menu or `QS /… /U`) | `QS /280 DAL123` |
+| Direct (route menu, `WHEN ABLE` too, or `QU … /U`) | `QU LUNNI DAL123` |
+| Route (route menu, edited route) | `AM DAL123 RTE KBOS.SSOXS7.SSOXS.Q167.ZIZZI..KNUKK` |
+
+The commands follow CRC's ERAM command reference (docs.virtualnas.net/crc/eram). A route typed with spaces is
+converted to ERAM's dotted form (`.` next to an airway or procedure, `..` between fixes).
+
+**AMEND, for any aircraft (CPDLC or not).** Each EDST menu (ALT, CODE, HDG, SPD, route) has an **AMEND** button.
+Pick a value and press AMEND: the EDST updates its own row and the app types the command above into CRC, with
+no CPDLC uplink. That's how to amend an aircraft that isn't on CPDLC. AMEND always types into CRC, even with
+CRC ECHO off. With nothing selected, AMEND removes the last queued uplink as before. In a plain browser or a
+CRC tab (no app), AMEND updates the EDST only.
+
+- **Only after the uplink went out.** A rejected or failed uplink types nothing.
+- **Not echoed:** commands that came from CRC (they're already there), Mach speeds and "or greater/less" speeds
+  and present heading (CRC has no typed form for them; they're menu-only in CRC), conditional directs (AT fix /
+  AT altitude), crossing restrictions (CRC has no UC), departure clearances and weather deviations.
+- **How:** CRC has no way for other programs to give it commands, and it only takes keys while its window has
+  focus. So the app briefly brings CRC's ERAM window to the front, types the line, and gives focus back: a
+  blink of about 0.2 s.
+- **Which window:** the CRC ERAM window you used last (or the ERAM window that owns the CRC popup you used last).
+  If that isn't known, the ERAM window that was in front most recently. With several ERAM windows open, click in
+  the one you work in once so the app knows.
+- **When it won't type** (the top bar says `NOT SENT TO CRC` and why; the uplink itself still went out):
+  - you typed something into CRC's MCA and haven't entered it (part-way through a command). If the app only
+    isn't sure what the line holds (after a click or a key it can't follow, such as an arrow key), it presses
+    Esc in CRC first to clear the line, then types
+  - no CRC window is showing an ERAM display (it never types into the Messages or Controllers windows, or a CRC
+    window showing a browser tab)
+  - Windows didn't hand focus to CRC within half a second
+  - CRC runs as administrator, or vUSALink-Lite is the one watching CRC
+- **It changes CRC for real.** A typed `QZ`/`QU` amends the flight plan on vNAS, where other controllers see it,
+  exactly as if you had typed it.
+- Needs the EDST page with host API version 3 (vatflow, November 2026 or later).
+
 ## Top bar
 
 | Item | Effect |
 |---|---|
 | `CRC ●/○` | Whether CRC is running |
 | CRC MIRROR | Turn CRC mirroring on or off (on by default) |
+| CRC ECHO | Type uplinks sent from the EDST into CRC (off by default, see [CRC ECHO](#crc-echo-edst-uplinks-typed-into-crc)) |
 | CRC BAR | Switch the EDST to its compact CRC layout (`?crc=1`) |
 | ON TOP | Keep the app (and its pop-ups) above CRC |
 | − / + | Zoom (Ctrl+wheel works too) |
-| RELOAD / BROWSER | Reload (F5) / open the current page in your browser |
+| RELOAD / BROWSER | Reload the latest EDST from vatflow, skipping cached copies (F5 is a normal reload) / open the current page in your browser |
 
 Keys: **F11** full screen, **F12** developer tools.
 
@@ -226,9 +275,10 @@ The EDST page publishes `window.vUSALinkEDST`:
 
 | Member | |
 |---|---|
-| `version` | `2`. Bumped only if the API itself changes. Version 2 added ERAM handoffs, UC and `setCids` |
+| `version` | `3`. Bumped only if the API itself changes. Version 2 added ERAM handoffs, UC and `setCids`; version 3 added `setHost` (CRC echo) |
 | `command(text, {source})` | Runs an ERAM command the same way the EDST MCA does. Returns `{ok, action: 'uplink' \| 'amend' \| 'handoff' \| 'ignored', flid, error}` (`handoff` also has `sector`, `facility`, `freq`). With `source: 'crc'` the callsign must be typed (no fallback to the selected row), and commands the EDST doesn't handle come back `ignored` without touching the MCA |
 | `setCids(map)` | v2. `{CALLSIGN: {cid, sector}}` learned from CRC QF readouts. Replaces the page's table; the page shows the CID left of the callsign and `(sector)` when another sector owns the track |
+| `setHost({crcEcho})` | v3. With `crcEcho: true` the page posts `{t: 'crcEcho', text: 'QU LUNNI DAL123'}` to the app (WebView2 `postMessage`) after each uplink sent from the EDST that has an ERAM equivalent. Commands that came in through `command()` are never echoed |
 | `status()` | `{signedIn, canControl, testMode, listMode, refreshMs, mySectors}` |
 
 Everything else in the page is internal and free to change. If the loaded page has no host API, the app passes
