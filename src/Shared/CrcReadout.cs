@@ -410,20 +410,16 @@ namespace VusaLinkApp
             lock (sync) f = feed;
             var cs = r.Callsign;
             bool verified = false;
-            Pilot p;
-            if (f.Count > 0 && f.TryGetValue(cs, out p))
+            if (f.Count > 0)
             {
-                if (!Agrees(r, p)) { why = "type/beacon don't match VATSIM data for " + cs; return null; }
-                verified = true;
-            }
-            else if (f.Count > 0)
-            {
-                // OCR misreads: look-alike characters (AALI0I0 for AAL1010), one other wrong character (W -> H),
-                // or a stray character after the callsign (JBU1055X). Accept only a unique flight that also
-                // agrees on type or beacon.
-                var fixes = f.Where(kv => LooksLike(cs, kv.Key) && Agrees(r, kv.Value)).Select(kv => kv.Key).ToList();
-                if (fixes.Count == 1) { why = "OCR " + cs + " -> " + fixes[0]; cs = fixes[0]; verified = true; }
-                else if (fixes.Count > 1) { why = "ambiguous callsign " + cs + " (" + string.Join("/", fixes) + ")"; return null; }
+                string pick, reject;
+                pick = Pick(r, f.Select(kv => new KeyValuePair<string, Pilot>(kv.Key, kv.Value)), out reject);
+                if (pick == null && reject != null) { why = reject; return null; }
+                if (pick != null)
+                {
+                    if (pick != cs) why = "OCR " + cs + " -> " + pick;
+                    cs = pick; verified = true;
+                }
                 // Not on VATSIM at all (e.g. a test server): keep it unverified. The EDST still checks the callsign.
             }
             Pilot conn;
@@ -442,6 +438,48 @@ namespace VusaLinkApp
             Save();
             if (Changed != null) Changed();
             return e;
+        }
+
+        // Which VATSIM flight a readout is: the callsign as read, or one OCR could have misread as it (look-alike
+        // characters such as AALI0I0 for AAL1010, one other wrong character, or a stray character after it). The
+        // flight must agree on type or beacon. If several do (a fleet of same-type flights one digit apart, e.g.
+        // FDX18 / FDX19 / FDX12, all B77L), the readout's beacon decides when it matches one of them, then the
+        // closest callsign: as read, then look-alikes only, then one other wrong character. Still a tie: rejected.
+        // Returns null with 'reject' null when nothing on VATSIM looks like it (e.g. a test server).
+        static string Pick(QfReadout r, IEnumerable<KeyValuePair<string, Pilot>> feed, out string reject)
+        {
+            reject = null;
+            var read = r.Callsign;
+            var cands = new List<KeyValuePair<string, int>>();     // callsign, distance
+            bool exactSeen = false;
+            foreach (var kv in feed)
+            {
+                int d = Distance(read, kv.Key);
+                if (d < 0) continue;
+                if (d == 0) exactSeen = true;
+                if (Agrees(r, kv.Value)) cands.Add(new KeyValuePair<string, int>(kv.Key, d));
+            }
+            var pilots = feed.ToDictionary(kv => kv.Key, kv => kv.Value);
+            if (cands.Count == 0)
+            {
+                if (exactSeen) reject = "type/beacon don't match VATSIM data for " + read;
+                return null;
+            }
+            if (r.Beacon != null)
+            {
+                var byBeacon = cands.Where(c => BeaconAgrees(r, pilots[c.Key])).ToList();
+                if (byBeacon.Count > 0) cands = byBeacon;
+            }
+            int best = cands.Min(c => c.Value);
+            var top = cands.Where(c => c.Value == best).Select(c => c.Key).ToList();
+            if (top.Count == 1) return top[0];
+            reject = "ambiguous callsign " + read + " (" + string.Join("/", top) + ")";
+            return null;
+        }
+
+        static bool BeaconAgrees(QfReadout r, Pilot p)
+        {
+            return r.Beacon != null && (r.Beacon == p.AssignedSquawk || r.Beacon == p.Squawk);
         }
 
         static bool Agrees(QfReadout r, Pilot p)
@@ -472,13 +510,26 @@ namespace VusaLinkApp
         // difference, or the same plus one stray trailing character.
         public static bool LooksLike(string read, string real)
         {
-            if (read == real) return false;
-            if (read.Length == real.Length + 1) read = read.Substring(0, real.Length);
-            if (read.Length != real.Length) return false;
-            int other = 0;
+            return read != real && Distance(read, real) >= 0;
+        }
+
+        // How far an OCR read is from a real callsign: 0 = identical, 1 = look-alike characters only (F0X18 for
+        // FDX18), +1 for a stray trailing character, 3 = one other wrong character too. -1 = not alike.
+        public static int Distance(string read, string real)
+        {
+            if (read == null || real == null) return -1;
+            if (read == real) return 0;
+            int stray = 0;
+            if (read.Length == real.Length + 1) { read = read.Substring(0, real.Length); stray = 1; }
+            if (read.Length != real.Length) return -1;
+            int folded = 0, other = 0;
             for (int i = 0; i < read.Length; i++)
-                if (read[i] != real[i] && Fold(read[i]) != Fold(real[i]) && ++other > 1) return false;
-            return true;
+            {
+                if (read[i] == real[i]) continue;
+                if (Fold(read[i]) == Fold(real[i])) folded = 1;
+                else if (++other > 1) return -1;
+            }
+            return other * 3 + folded + stray;
         }
 
         void RefreshFeed()

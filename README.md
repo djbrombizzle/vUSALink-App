@@ -197,7 +197,10 @@ SKW5646. CRC keeps its own line with the CID.
   garbled it reads that spot again enlarged. The picture is processed in memory and never saved or sent; only the
   parsed readout line is logged.
 - **Checked before it's trusted:** the readout's callsign must be a real flight in the VATSIM data with a matching type
-  or beacon code. A single misread character (OCR can read W as H) is corrected only when exactly one real flight fits.
+  or beacon code. A misread character (OCR can read W as H, or D as 0) is corrected to the closest real flight. When
+  several fit, for example a fleet of same-type flights one digit apart (FDX18, FDX19, FDX12), the readout's beacon
+  code picks the right one, then the closest spelling. If it's still a tie, nothing is learned and the log says
+  `ambiguous callsign`.
   On a test server (flights not on VATSIM) pairs are kept unverified; the EDST still checks the callsign exists.
 - **Unknown CID:** a `/U` uplink with a CID the app hasn't learned sends nothing, and the top bar says
   `CID 151 NOT KNOWN - QF IT IN CRC FIRST`. Other lines with unknown CIDs (such as routine handoffs) are skipped quietly.

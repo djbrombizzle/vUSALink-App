@@ -13,7 +13,7 @@ namespace VusaLinkApp
     // The version of vUSALink App and vUSALink-Lite (both ship together). Bump it with each release tag (v0.3.3 ...).
     static class AppVersion
     {
-        public const string Current = "0.3.4";
+        public const string Current = "0.3.5";
     }
 
     class UpdateInfo
