@@ -252,16 +252,18 @@ From left to right:
 | **R / Y / A** | Conflict probe: **R** red, other aircraft within 5 nm; **Y** yellow, 5 to 12 nm; **A** orange, within 3 nm of special-use airspace. The number is how many. Bright = on cleared altitudes; dark = only if an uncleared altitude change happens. Letters in all three boxes mean the aircraft isn't probed: **S** probe stopped, **H** holding, **X** no position. | Left: select (for Show / Show ALL). Middle: show all of that type on the GPD. Right: acknowledge, stop or resume the probe, clear the hold mark. |
 | **Flight ID** | A small box (white = on CPDLC), the CRC **CID** (only with vUSALink App or Lite), the **callsign** (white when on CPDLC), and **(sector)** when another sector owns the track in CRC. Then the message triangle: **▼** pilot message waiting (flashes red until read), **▶** handoff awaiting WILCO, **▲** other uplink awaiting WILCO (red after 2 minutes). **▶\|(11)** = an ERAM handoff typed in CRC (11.1). | The callsign opens the **HANDOFF** menu. A triangle opens the **MESSAGES** window. |
 | **PA** | Not used yet. | |
-| **Type** | Aircraft type. | |
+| **Type** | Aircraft type and equipment suffix. A **coral** `/A` (or `/-` when there is no suffix) means the flight can't fly its route (see Route). | Right-click the coral suffix: acknowledge. |
 | **Alt.** | Present altitude, then the assigned altitude in white when there is one. **Green underline:** awaiting WILCO. **Red underline:** no reply after 2 minutes. | Opens the **ALT** menu. A red underline: acknowledge it. |
 | **Code** | Current squawk. If the flight plan's assigned code differs, it follows in **amber underline**. | The amber code: uplinks `SQUAWK nnnn` straight away. Elsewhere: the **CODE** menu. |
 | **Hdg / Spd** | Live heading and **ground speed**, then the assigned heading or speed in white when there is one (`H270`, `280`, `M.79`), underlined while it awaits WILCO. A direct or new route ends an assigned heading; RESUME NORMAL SPEED ends an assigned speed; UNABLE removes either. | Heading: **HDG** menu. Speed: **SPD** menu. |
-| **Route** | Departure, route, destination. Underlined while a route, direct, crossing, hold or clearance awaits WILCO. | Opens the **ROUTE** menu. |
+| **Route** | The route in ERAM form: `RDU..ROA..EKN..IHD.NEST03.PIT` (`..` between fixes, `.` next to an airway or procedure, US airports without the K). After a direct-to it starts at the present position: `RIC./.GVE.V38..CLE`. Left of it, the **remarks indicator**: yellow `*` in a yellow box = flight plan remarks you haven't looked at, white `*` = seen. **Flight ineligible for route:** the route has Q or Y airways (need RNAV) or T airways (need GNSS) the equipment suffix can't fly. The suffix shows coral in front of the route and in the Type column, and a cyan box surrounds the route. Underlined while a route, direct, crossing, hold or clearance awaits WILCO. | Opens the **ROUTE** menu. Middle-click: flight plan readout. The `*`: shows the remarks (ICAO `STS/` reason for special handling, then `RMK/`) in place of the route; click again for the route. Right-click the coral suffix: acknowledge (it turns white and the box goes); a route the flight can fly clears it. |
 
 - Click elsewhere on a row to select it (teal); click again to deselect. Many menus and the MCA act on the selected
   row.
 - **Dimmed rows** are border-buffer aircraft from a neighbouring ARTCC that aren't on your frequency or working you.
 - Click a column heading (Flight ID, Type, Alt., Code, Hdg/Spd, Route) to sort by it.
+- The EDST uses the ERAM console font (ERAMv110). Characters it doesn't have fall back to the old EDST font.
+- Remarks come from the VATSIM flight plan. `/V/`, `TCAS` and `SIMBRIEF` are left out, so most plans show no indicator. TFM protected segments (white chevrons) and preferential routes (cyan brackets) aren't shown: VATSIM has no data for them.
 
 ---
 
@@ -315,13 +317,33 @@ heading. **UPLINK** sends `TURN LEFT HEADING 270`, `FLY HEADING 270` or `FLY PRE
 
 ### 7.6 ROUTE menu
 
-- The **edit area** shows the filed route; you can change it. Below it are the fixes still ahead of the aircraft.
-- **Direct to a fix:** click the fix, choose **DIRECT** (`PROCEED DIRECT TO LUNNI`), **WHEN ABLE**, **AT FIX**
-  (`AT X PROCEED DIRECT TO …`) or **AT ALT** (`AT FL240 PROCEED DIRECT TO …`), then UPLINK.
-- **New route:** with no fix selected, UPLINK sends the edit area as `CLEARED TO KDST VIA <route>`.
-- **WX DEV:** set the distance and LEFT/RIGHT, then click: sends `CLEARED TO DEVIATE UP TO 20 NM LEFT OF ROUTE` at
-  once.
-- **CLEARANCE:** the departure clearance panel (7.7).
+Click a route in the ACL. The menu follows ERAM's Route Menu (TI 6110.101 3.2.1.2).
+
+- **Top:** callsign and type/equipment, then three mode buttons. The selected one is shaded, and the EDST remembers it.
+  - **Trial Plan:** the change becomes a trial plan on the Plans Display (10.9). Nothing is sent.
+  - **Amend:** amends the flight plan with no CPDLC. vUSALink App types it into CRC: `QU fix` for a direct,
+    `AM <cs> RTE <route>` for a route. The result is posted on the Plans Display (`.AM`).
+  - **Amend + Uplink:** the same amendment, plus the CPDLC clearance (`PROCEED DIRECT TO …` or
+    `CLEARED TO KDST VIA …`). The amendment is only made once the uplink goes out. This mode shows the CPDLC options:
+    DIRECT / WHEN ABLE / AT FIX / AT ALT (a conditional AT FIX or AT ALT direct is uplinked but not amended: CRC has
+    no command for it), PD and the reasons (TFC, IMM, RES, EXP, WX), **WX DEV** (sends at once) and **CLEARANCE** (7.7).
+    Opening the menu from a pilot's direct or route request starts in this mode.
+- **Keyboard input:** the current route (from present position once airborne). Typing goes in front of it: type the
+  new part ending at a fix of the current route (`KATL..BOBBY..WALET`) and the route carries on from there. Any other
+  edit is taken as the whole new route. **Enter** (or clicking the selected mode again) sends it. You can start typing
+  anywhere in the menu.
+- **Include PAR / Append * / Append ⊕:** shown as in ERAM (the two Appends can't both be on) but they don't do anything yet.
+- **Direct-to-Fix:** the ATC intended route (not editable). Airways the equipment can't fly (Q/Y without RNAV,
+  T without GPS) are underlined in coral. Below it are the fixes ahead, 10 to a column, ending with the destination.
+  Click one: a direct in the selected mode.
+- **Apply ATC Preferred Route:** FAA preferred routes (the national Preferred Routes database) to the destination that
+  start at the departure airport (aircraft on the ground) or at a fix still ahead. **ELIGIBLE** lists those that fit
+  the flight's altitude, aircraft class (jet, turboprop, piston), equipment (RNAV) and hours. They are marked `→`.
+  **ALL** adds the others; hover one to see why it isn't eligible. Click a route: it replaces the route from its first
+  fix, in the selected mode.
+- **Bottom:** **Flight Data** (posts the flight plan on the Plans Display), **Previous Route** (greyed when the route
+  hasn't changed), **TFM Reroute Menu** (greyed: TFM reroutes will come from VATFLOW; then the menu shows
+  "Pending Reroute" and the protected segment), **Exit**.
 
 ### 7.7 Departure clearance (CLEARANCE panel)
 
@@ -653,7 +675,7 @@ Entries are listed current plans first, then proposed, previous route, trial and
   Trial Plan or Amend. A route that ends at a different airport asks first (**AM Change Destination Menu**).
 - **Previous Route...** Shows the route before the last change and posts it as a `.PR` entry; **Apply Previous
   Route** amends back to it. Greyed until the route has changed while the EDST was open: a pilot refile, a route
-  amendment from here or the ACL route menu (UPLINK or AMEND), or a CRC amendment that reached VATSIM.
+  amendment from here or the ACL Route Menu (Amend or Amend + Uplink), or a CRC amendment that reached VATSIM.
 - **Stop Probe... / Resume Probe:** stop conflict alerts at the present position or at a fix ahead (the stop starts
   when the aircraft passes the fix). It shows brown in the ACL and here, like the ACL's ack menu.
 - **Trial Restrictions...** Always grey (no restrictions on VATSIM).
