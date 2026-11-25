@@ -179,7 +179,8 @@ You can only be signed in from **one place at a time** per CID. A second browser
 | **↓ / MORE** | Shows a second row: **WIND** (winds aloft), **ALTIM SET** (altimeters), **MCA** (jumps to the MCA). |
 | **ACL nn** | The Aircraft List and how many aircraft are on it. Click to close the Departure List. |
 | **DEP** | Departure List (10.1). The number is the count of proposed departures. |
-| **GPD** | Graphical Plan Display: a map of your traffic, routes and conflicts (10.2). |
+| **GPD** | Graphic Plan Display: your traffic as ERAM data blocks on a map, trial plans and conflicts (10.2). |
+| **PLANS** | Plans Display: flight plan readouts, trial plans and amendments (10.9). |
 | **WX REPORT** | METARs (10.5). |
 | **SIG** | SIGMETs. Flashes and shows `SIG[n]` when there are new ones (10.3). |
 | **NOT** | NOTAMs and TFRs. Flashes on new items (10.4). |
@@ -194,13 +195,15 @@ You can only be signed in from **one place at a time** per CID. A second browser
 | **⧉** | Copies the CRC-layout link, for adding the EDST as a CRC browser tab. |
 
 **SAT COMM** is lit while the CPDLC (KUSA hub) connection is up. **ACL** shows how many aircraft are on the list;
-clicking it closes the Departure List. PLANS, UA, KEEP ALL, NON-ADSB, STATUS and OUTAGE are shown for the ERAM look
+clicking it closes the Departure List. **NON-ADSB** turns the GPD's non-ADS-B indicator (a coral A) on and off.
+UA, KEEP ALL, STATUS and OUTAGE are shown for the ERAM look
 and say "coming soon".
 
 ### 5.2 Aircraft List toolbar
 
 | Control | What it does |
 |---|---|
+| **Plan Options...** | Posts the selected aircraft's flight plan in the Plans Display and opens its Plan Options menu (10.9). |
 | **Hold...** | Hold instructions for the selected aircraft (7.9). |
 | **Show / Show ALL** | After clicking an R/Y/A conflict box: shows that conflict (or all of that type) on the GPD. |
 | **Sort...** | The list filter (below). Highlighted when not on the default. |
@@ -470,10 +473,85 @@ Proposed and connected departures from airports in your ARTCC, from 30 minutes a
 30 seconds. **P** = `A` connected on VATSIM, `N` proposed only. Sort by P-time, destination, departure or callsign;
 ADD/FIND filters.
 
-### 10.2 GPD: Graphical Plan Display
+### 10.2 GPD: Graphic Plan Display
 
-A map of your ARTCC with the aircraft on your list, their routes, and conflicts in red, yellow or orange. Click an
-aircraft to select its row. **Map Options:** ERAM sector lines (high/low), routes, airport and fix labels.
+The ERAM Graphic Plan Display (FAA TI 6110.101, chapter 5): your traffic as data blocks on a black map, with routes,
+trial plans and conflicts. It is not radar. Open it with **GPD**; it stays open while you work the Aircraft List (it is
+a window, not a pop-up). Drag the title bar to move it and the bottom-right corner to resize it. Closing it (Exit or
+X) forgets the range and center, so it opens on your saved map (**Tools > Save GPD Map**) or the whole ARTCC.
+
+**Data block** (up to five lines, with a leader line to the diamond position symbol and a direction-of-flight vector):
+
+| Line | Shows |
+|---|---|
+| 0 | Alert counts in red, yellow and orange. White once every problem of that type is acknowledged; brown `X` / `S` / `H` / `F` when the flight isn't probed (no position, probe stopped, hold, frozen). Blank when there are none. |
+| 1 | Callsign (reverse video when selected). |
+| 2 | Altitude: `350C` in conformance with the assigned altitude, `350↑219` / `240↓310` climbing or descending to it, `290T242` with an interim altitude, `350219` / `230370` climbing or descending to a block, `230B350` inside the block, just the present altitude when nothing is assigned. |
+| 3 | Destination (US airports without the K) and ground speed. |
+| 4 | The flight plan altitude while climbing to an interim, or the block (`290B370`) while climbing or descending into it. |
+
+The whole block is red or yellow when the aircraft has an unacknowledged red or yellow alert. **Suppress** shows only
+the position symbol and altitude for aircraft that have no route on display (**Restore** brings the blocks back).
+With **NON-ADSB** (top toolbar) on, a coral **A** sits on the far side of the symbol from the leader for aircraft whose
+VATSIM flight plan equipment has no ADS-B.
+
+**Clicking the data block**
+
+| Field | Left-click | Middle-click | Right-click |
+|---|---|---|---|
+| Callsign | Select the aircraft (selects its ACL row too) | **Show All** on/off | |
+| Line 0 alert count | Select it (for **Show**) | **Show** it | Conflict Acknowledge menu |
+| Altitude | Altitude Menu (trial plan or amend, like the Plans Display) | | |
+| Destination | Route Menu (direct-to fix, edited route) | | **Graphic Menu** |
+| Ground speed | Speed Menu | | |
+| Trial plan ID (second leader) | Select the trial (for Send AM / Send INT) | | Remove it from the GPD |
+
+Trial plans made here open in the Plans Display too (10.9), and Plans Display trial plans are drawn here.
+
+**Menu bar, first row**
+
+| Button | What it does |
+|---|---|
+| **Plan Options...** | The selected aircraft's (or trial plan's) Plan Options: Altitude, Speed, Route, Previous Route, Stop/Resume Probe, Trial Departure, Resubmit, **Plans** (its plan in the Plans Display) and **Delete** (removes it from the GPD; not while it has red or yellow alerts). |
+| **Hold...** | Hold Data Menu for the selected aircraft. |
+| **Show** | Shows the selected alert: the two routes with the conflict segment. Again: removes it. |
+| **Show All** | Shows the selected aircraft's route with all its alerts. Again: removes it. |
+| **Graphic...** | Graphic Menu (below). |
+| **Clean Up** | Removes route lines, trial plan routes and alert displays from the GPD. |
+| **Send AM / Send INT** | Sends the selected trial plan as an amendment or an interim altitude, as in the Plans Display. |
+| **Template...** | Amendment Template for the selected aircraft, or the Flight Plan Template. |
+| **Exit** | Closes the GPD. |
+
+**Menu bar, second row**
+
+| Button | What it does |
+|---|---|
+| **Recenter** | Then click the map where the new center goes (Esc cancels). You can also drag the map. |
+| **Range nnn** | The width of the map in nm. Click for 10 to 1000 or type a value; the mouse wheel over the button or the map changes it too. |
+| **Suppress / Restore** | Limited or full data blocks (above). |
+| **Map Options...** | **Map Features** (below) and the **AC Display Menu**: Aircraft List filter (on: only ACL aircraft; off: all traffic in the ARTCC), automatic data block offsetting, altitude filter limits, route preview time (0, 2, 5, 10 or 20 minutes of route ahead of every aircraft). |
+| **Tools...** | **Airspace Status** (the SAAs in your ARTCC with floor and ceiling; alerting ones first in orange; click one to center the map on it), **Save GPD Map**, and Saved Map once saved. Airport Stream Filter Status, Options and Restrictions are grey (not on VATSIM). |
+| **Saved Map** | Back to the saved range and center. |
+| **Future Time** | 0 to 20 minutes ahead: drag the slider, click the bar to step a minute, middle-click to jump. Aircraft move along their routes at their ground speed; the title says `Future Time +n` and the window gets a wide white border. Alerts don't change. |
+
+Under the buttons, the **range scale** shows five marks (for example 0 to 25 nm).
+
+**Map Features:** sector boundaries (off, high, low), adjacent centers, approach control boundaries (dashed grey;
+only where they're on file), Special Activity Airspace (orange while alerting) and labels, airports (box), NAVAIDs
+(circle), waypoints (+), their labels, airways, and the range scale. Your own center is always drawn in bold white.
+To keep the map readable, waypoints show at range 200 and below, airports and airways at 400 and below, NAVAIDs at 500
+and below. Settings are kept in your browser.
+
+**Routes** are drawn only when asked for: Show, Show All, the selected aircraft, route preview and trial plans
+(dashed, with a second leader labelled `DAL123.T1`). Arrows along a route show the direction of flight; the conflict
+part is drawn thick in red, yellow or orange.
+
+**Graphic Menu** (5.2.2): a route trial plan drawn on the map. Select an airborne aircraft and click **Graphic...**
+(or right-click its destination). Click points on the map (a dashed line follows them; **Undo point** takes the last
+one back), then click the fix where the flight rejoins its route. The trial plan's route is the points as ERAM
+latitude/longitude fixes (`3506/08204`), the rejoin fix and the rest of the route; it is probed, shown here and in the
+Plans Display, and **Send AM** sends it as `AM DAL123 RTE 3506/08204..3511/08150..LVL..AML`. Include PAR, Append * and
+Append ⊕ are grey (no adapted routes on VATSIM).
 
 ### 10.3 SIG: SIGMETs
 
@@ -506,6 +584,116 @@ Runs after every list update. It checks your aircraft against all traffic at the
 
 A small, read-only window listing the aircraft **on your frequency and on CPDLC** (callsign and level). Made to sit
 on top of CRC. It can't send anything and never makes sounds.
+
+### 10.9 PLANS: Plans Display
+
+The ERAM Plans Display (FAA TI 6110.101, chapter 6): flight plan readouts, **trial plans** probed for conflicts
+before you commit to them, and **amendments**. Open it with **PLANS**; it also opens by itself when a plan is posted.
+Drag the title bar to move it and the bottom-right corner to resize it. It closes when the last plan is removed.
+
+**Posting a plan**
+
+| Do this | Posts |
+|---|---|
+| Middle-click a **route** in the Aircraft List | The aircraft's **current plan** |
+| Select an ACL row, then **Plan Options...** (ACL toolbar) | Its current plan, with Plan Options open |
+| Middle-click a **route** in the Departure List | The **proposed plan** |
+| Route menu → **PREVIOUS ROUTE**, or Plan Options → **Previous Route...** | The **previous route** (`.PR`) |
+| Plan Options → **Altitude... / Speed... / Route...** in Trial Plan mode | A **trial plan** (`.T1`, `.T2` ...) |
+| **Send AM**, **Send INT**, Amend mode, or the Amendment Template | An **amendment plan** (`.AM`) |
+
+Entries are listed current plans first, then proposed, previous route, trial and amendment plans.
+
+**What an entry shows**
+
+- **Plan ID:** CID and callsign, plus the owning sector in parentheses when another sector owns the track. The
+  CID is CRC's (learned from QF) or else the last three digits of the VATSIM CID. The ID turns red or yellow when the
+  plan has a red or yellow problem.
+- **Readout:** `TYPE BEACON SPEED FIX TIME ALT`, then the route. Airborne: FIX is the present position
+  (`3455/8243`), TIME is `E` (now), ALT is the assigned altitude, and the route starts at the present position
+  (`KATL./.3455/8243..LVL..AML..KIAD`, with the ETA when the route has coordinates). On the ground or proposed: FIX is
+  the departure airport and TIME is the proposed time (`P1530`). Remarks follow in grey. The data comes from the
+  VATSIM flight plan.
+- **Trial and AM plans:** what changes, for example `AM 413 ALT 290 FIX 3834/8040 TIM E1305`, plus `RTE ...` for a
+  route trial. A trial plan's box counts down from **5:00**; it is removed when it reaches zero.
+- **Problems:** under a current or trial plan, one line per conflict: the other aircraft (or airspace), minutes to
+  the conflict and its Zulu time, for example `N22T  5 min 1535Z (25)`. Red, yellow or orange as in the ACL;
+  **NEW** for the first minute. Current plans use the ACL's conflict probe; a trial plan is probed with its own
+  altitude, speed or route against traffic within 200 nm.
+- **Coral `A`** left of the CID: not ADS-B equipped (no B1/B2/U1/U2/V1/V2 in the ICAO equipment).
+- Brown lines: **Stop Probe** and "Aircraft not probed" reasons.
+
+**Mouse**
+
+| On | Left-click | Middle-click | Right-click |
+|---|---|---|---|
+| Plan ID | Select (menu bar buttons light up) | **Show All** on the GPD (again: removes it); a trial plan's route goes back on the GPD. Proposed plan: trial departure now | Delete the entry |
+| Problem | Select it (for **Show**) | **Show** it on the GPD | Acknowledge (turns white); again to undo |
+
+**Menu bar** (grey = not available for the selection)
+
+| Button | What it does |
+|---|---|
+| **Plan Options...** | Altitude, Speed, Route, Previous Route, Stop/Resume Probe, Trial Departure, Resubmit, Delete (below). |
+| **Show** | Shows the selected problem on the GPD. |
+| **Show All** | Shows the selected flight (its row selected) on the GPD. |
+| **Send AM** | Sends the selected trial plan as an amendment: the trial is replaced by an `.AM` entry. |
+| **Send INT** | Sends the trial altitude as an **interim** altitude (`QQ`). |
+| **Tools...** | Restrictions: always grey (VATSIM has no adapted restrictions). |
+| **Template...** | Nothing selected: Flight Plan Template. A plan selected: Amendment Template (below). |
+| **ICAO** | Adds the ICAO flight plan data (FPL fields 7 to 18) under the selected current or proposed plan. |
+| **Clean Up** | Removes all trial, current, proposed, previous route and accepted amendment plans. |
+
+**Plan Options menu**
+
+- **Altitude...** List 600 to 010 or type a value and press Enter. **Trial Plan** (default) makes a trial plan;
+  **Amend** amends straight away. **INT** makes it an interim altitude.
+- **Speed...** Knots (TAS), `+20` / `-20` from the current value, or Mach `.78` / `+.02`. Trial Plan or Amend.
+- **Route...** Edit the route and press Enter (Shift+Enter for a new line), or click a **direct-to fix**.
+  Trial Plan or Amend. A route that ends at a different airport asks first (**AM Change Destination Menu**).
+- **Previous Route...** Shows the route before the last change and posts it as a `.PR` entry; **Apply Previous
+  Route** amends back to it. Greyed until the route has changed while the EDST was open: a pilot refile, a route
+  amendment from here, or a CRC amendment that reached VATSIM.
+- **Stop Probe... / Resume Probe:** stop conflict alerts at the present position or at a fix ahead (the stop starts
+  when the aircraft passes the fix). It shows brown in the ACL and here, like the ACL's ack menu.
+- **Trial Restrictions...** Always grey (no restrictions on VATSIM).
+- **Trial Departure...** Proposed plans: a trial plan at a new departure time. **+ / -** move a minute; **P Time**
+  uses the filed time (grey once it has passed); type HHMM (more than 30 minutes ago means tomorrow); **Create TP**.
+- **Resubmit:** re-probes a trial plan under a new number. **Delete:** removes the entry.
+
+A trial plan made from another trial plan keeps that trial's other changes, so you can trial an altitude and then
+add a route to it.
+
+**Templates**
+
+- **Amendment Template:** AID, TYP, BCN, SPD, ALT, RTE and RMK, filled in from the flight plan. Change fields and
+  press Send (or Enter). Only the fields you changed are sent.
+- **Flight Plan Template:** fill in AID and RTE (and TYP, ALT); Send adds an EDST flight strip to the Aircraft List.
+  CRC has no command that creates an IFR flight plan, so nothing is typed into CRC.
+
+**What an amendment does**
+
+The EDST takes the change itself (assigned altitude, previous route), and in **vUSALink App** the app types it into
+CRC, one command per field (CRC's `AM` takes one field at a time):
+
+| Change | Typed into CRC |
+|---|---|
+| Altitude | `QZ 290 AAL123` (INT / Send INT: `QQ 290 AAL123`) |
+| Direct-to fix | `QU LVL AAL123` |
+| Route | `AM AAL123 RTE KATL.PENCL3.PENCL..SOT` |
+| Speed (knots) | `AM AAL123 SPD 450` (filed speed; Mach isn't typed) |
+| Type | `AM AAL123 TYP B738/L` |
+| Beacon | `AM AAL123 BCN 1301` |
+| Remarks | `AM AAL123 RMK ++NEW PILOT++` (blank clears them) |
+
+The `.AM` entry lists each line typed and **ACCEPT**. It goes away by itself after 30 seconds. **NOT SENT** (or a
+"not typed" line) stays until you delete it: outside vUSALink App nothing is typed into CRC (an altitude is still
+set in the EDST), and the app types only letters, digits, spaces and `. / + -`, so remarks with other characters
+aren't typed. A track another sector owns asks first (**Eligibility Menu: Override and Send / Don't Send and Exit**).
+Amendments don't send CPDLC; use the ACL menus or the MCA to uplink.
+
+Not on VATSIM, so not in this Plans Display: adapted restrictions, TFM reroutes, AAR/PAR in routes, the Equipment
+and More templates, non-basis plans.
 
 ---
 
@@ -555,6 +743,8 @@ The EDST then shows the CID to the left of the callsign, and `(sector)` when ano
   | New route | `AM AAL123 RTE KJFK.LINND3..CHUBY…` |
 
 - **AMEND** (any menu): the same CRC command **without** a CPDLC uplink, for aircraft not on CPDLC. Works with ECHO off.
+- **Plans Display amendments** (Send AM, Send INT, Amend mode, Amendment Template) are typed the same way, also with
+  ECHO off; they add `AM ... SPD / TYP / BCN / RMK` (table in 10.9).
 - The app briefly brings CRC's ERAM window to the front to type (about 0.2 s), then gives focus back. It types into
   the ERAM window you used last. It won't type over a command you're half-way through in CRC.
 - Not echoed (CRC has no typed form): Mach, present heading, +/− speeds, crossing restrictions, holds, clearances.

@@ -116,6 +116,8 @@ namespace VusaLinkApp
                 case ' ': vk = 0x20; return true;
                 case '/': vk = 0xBF; return true;
                 case '.': vk = 0xBE; return true;
+                case '-': vk = 0xBD; return true;                 // VK_OEM_MINUS
+                case '+': vk = 0xBB; shift = true; return true;   // Shift + VK_OEM_PLUS ("=" key): AM ... RMK ++text++
             }
             return false;
         }

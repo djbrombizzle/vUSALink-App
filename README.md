@@ -243,6 +243,11 @@ DAL123 direct LUNNI from the route menu types `QU LUNNI DAL123` into CRC's MCA a
 The commands follow CRC's ERAM command reference (docs.virtualnas.net/crc/eram). A route typed with spaces is
 converted to ERAM's dotted form (`.` next to an airway or procedure, `..` between fixes).
 
+**Plans Display amendments** (PLANS window: Send AM, Send INT, Amend mode, Amendment Template) are typed like AMEND,
+one command per field: `QZ` / `QQ` for altitudes, `QU` for a direct-to, and `AM DAL123 RTE|SPD|TYP|BCN|RMK …`.
+The app types letters, digits, spaces and `. / + -` (`+` for `RMK ++TEXT++`); a line with other characters is
+refused. See [MANUAL.md](MANUAL.md#109-plans-plans-display).
+
 **AMEND, for any aircraft (CPDLC or not).** Each EDST menu (ALT, CODE, HDG, SPD, route) has an **AMEND** button.
 Pick a value and press AMEND: the EDST updates its own row and the app types the command above into CRC, with
 no CPDLC uplink. That's how to amend an aircraft that isn't on CPDLC. AMEND always types into CRC, even with
