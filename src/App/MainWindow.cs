@@ -335,6 +335,17 @@ namespace VusaLinkApp
             core.NavigationStarting += (s, e) => SetStatus("LOADING " + Short(e.Uri), Theme.Dim);
             core.NavigationCompleted += OnNavigated;
             web.ZoomFactor = Math.Max(0.5, Math.Min(2.5, cfg.Zoom));
+            // Started by an update: drop the cached EDST files first (as RELOAD does), so the page and scripts come
+            // fresh from vatflow instead of a copy cached before the update. Sign-in and EDST settings stay.
+            if (Updater.JustUpdated)
+            {
+                try
+                {
+                    await core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache);
+                    Log.Info("Started after update: web cache cleared");
+                }
+                catch (Exception ex) { Log.Info("Cache clear after update failed: " + ex.Message); }
+            }
             ready = true;
             Navigate();
         }

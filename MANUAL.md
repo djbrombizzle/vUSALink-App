@@ -653,7 +653,7 @@ Entries are listed current plans first, then proposed, previous route, trial and
   Trial Plan or Amend. A route that ends at a different airport asks first (**AM Change Destination Menu**).
 - **Previous Route...** Shows the route before the last change and posts it as a `.PR` entry; **Apply Previous
   Route** amends back to it. Greyed until the route has changed while the EDST was open: a pilot refile, a route
-  amendment from here, or a CRC amendment that reached VATSIM.
+  amendment from here or the ACL route menu (UPLINK or AMEND), or a CRC amendment that reached VATSIM.
 - **Stop Probe... / Resume Probe:** stop conflict alerts at the present position or at a fix ahead (the stop starts
   when the aircraft passes the fix). It shows brown in the ACL and here, like the ACL's ack menu.
 - **Trial Restrictions...** Always grey (no restrictions on VATSIM).
@@ -691,6 +691,12 @@ The `.AM` entry lists each line typed and **ACCEPT**. It goes away by itself aft
 set in the EDST), and the app types only letters, digits, spaces and `. / + -`, so remarks with other characters
 aren't typed. A track another sector owns asks first (**Eligibility Menu: Override and Send / Don't Send and Exit**).
 Amendments don't send CPDLC; use the ACL menus or the MCA to uplink.
+
+**Amended routes stay in the EDST.** A direct or reroute (from here, the GPD, the ACL route menu, or `QU … /U`)
+changes CRC's flight plan, but the VATSIM data the EDST draws from usually doesn't change (a `QU` never does). So the
+EDST keeps the new route itself, like an assigned altitude: the ACL route, the GPD route line and the plans here all
+show it. When the VATSIM flight plan changes (a pilot refile, or vNAS passing the amendment on), VATSIM's route takes
+over again. A kept route is dropped after 6 hours.
 
 Not on VATSIM, so not in this Plans Display: adapted restrictions, TFM reroutes, AAR/PAR in routes, the Equipment
 and More templates, non-basis plans.
