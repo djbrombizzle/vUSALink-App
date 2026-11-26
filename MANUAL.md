@@ -249,14 +249,14 @@ From left to right:
 | Column | What you see | Click |
 |---|---|---|
 | **VCI** (green headset) | **Solid:** on your frequency and on CPDLC. **Faint:** on your frequency, not on CPDLC. **Flashing:** asking to log back on after you forced it off. Blank: not on your frequency. | Solid: **force logoff** (asks first). Flashing: **accept logon**. |
-| **R / Y / A** | Conflict probe: **R** red, other aircraft within 5 nm; **Y** yellow, 5 to 12 nm; **A** orange, within 3 nm of special-use airspace. The number is how many. Bright = on cleared altitudes; dark = only if an uncleared altitude change happens. Letters in all three boxes mean the aircraft isn't probed: **S** probe stopped, **H** holding, **X** no position. | Left: select (for Show / Show ALL). Middle: show all of that type on the GPD. Right: acknowledge, stop or resume the probe, clear the hold mark. |
+| **R / Y / A** | Conflict probe: **R** red, another aircraft within 5 nm and less than 1,000 ft; **Y** yellow, not used; **A** orange, within 3 nm of a special activity airspace you've activated. The number is how many. Bright = on cleared altitudes; dark = only if an uncleared altitude change happens. Letters in all three boxes mean the aircraft isn't probed: **S** probe stopped, **H** holding, **X** no position. | Left: select (for Show / Show ALL). Middle: show all of that type on the GPD. Right: acknowledge, stop or resume the probe, clear the hold mark. |
 | **Flight ID** | A small box (white = on CPDLC), the CRC **CID** (only with vUSALink App or Lite), the **callsign** (white when on CPDLC), and **(sector)** when another sector owns the track in CRC. Then the message triangle: **▼** pilot message waiting (flashes red until read), **▶** handoff awaiting WILCO, **▲** other uplink awaiting WILCO (red after 2 minutes). **▶\|(11)** = an ERAM handoff typed in CRC (11.1). | The callsign opens the **HANDOFF** menu. A triangle opens the **MESSAGES** window. |
 | **PA** | Not used yet. | |
 | **Type** | Aircraft type and equipment suffix. A **coral** `/A` (or `/-` when there is no suffix) means the flight can't fly its route (see Route). | Right-click the coral suffix: acknowledge. |
 | **Alt.** | Present altitude, then the assigned altitude in white when there is one. **Green underline:** awaiting WILCO. **Red underline:** no reply after 2 minutes. | Opens the **ALT** menu. A red underline: acknowledge it. |
 | **Code** | Current squawk. If the flight plan's assigned code differs, it follows in **amber underline**. | The amber code: uplinks `SQUAWK nnnn` straight away. Elsewhere: the **CODE** menu. |
 | **Hdg / Spd** | Live heading and **ground speed**, then the assigned heading or speed in white when there is one (`H270`, `280`, `M.79`), underlined while it awaits WILCO. A direct or new route ends an assigned heading; RESUME NORMAL SPEED ends an assigned speed; UNABLE removes either. | Heading: **HDG** menu. Speed: **SPD** menu. |
-| **Route** | The route in ERAM form: `RDU..ROA..EKN..IHD.NEST03.PIT` (`..` between fixes, `.` next to an airway or procedure, US airports without the K). After a direct-to it starts at the present position: `RIC./.GVE.V38..CLE`. Left of it, the **remarks indicator**: yellow `*` in a yellow box = flight plan remarks you haven't looked at, white `*` = seen. **Flight ineligible for route:** the route has Q or Y airways (need RNAV) or T airways (need GNSS) the equipment suffix can't fly. The suffix shows coral in front of the route and in the Type column, and a cyan box surrounds the route. Underlined while a route, direct, crossing, hold or clearance awaits WILCO. | Opens the **ROUTE** menu. Middle-click: flight plan readout. The `*`: shows the remarks (ICAO `STS/` reason for special handling, then `RMK/`) in place of the route; click again for the route. Right-click the coral suffix: acknowledge (it turns white and the box goes); a route the flight can fly clears it. |
+| **Route** | The route in ERAM form: `KRDU..ROA..EKN..IHD.NEST03.KPIT` (`..` between fixes, `.` next to an airway or procedure, airports by their ICAO id). After a direct-to it starts at the present position: `KRIC./.GVE.V38..KCLE`. Left of it, the **remarks indicator**: yellow `*` in a yellow box = flight plan remarks you haven't looked at, white `*` = seen. **Flight ineligible for route:** the route has Q or Y airways (need RNAV) or T airways (need GNSS) the equipment suffix can't fly. The suffix shows coral in front of the route and in the Type column, and a cyan box surrounds the route. Underlined while a route, direct, crossing, hold or clearance awaits WILCO. | Opens the **ROUTE** menu. Middle-click: flight plan readout. The `*`: shows the remarks (ICAO `STS/` reason for special handling, then `RMK/`) in place of the route; click again for the route. Right-click the coral suffix: acknowledge (it turns white and the box goes); a route the flight can fly clears it. |
 
 - Click elsewhere on a row to select it (teal); click again to deselect. Many menus and the MCA act on the selected
   row.
@@ -552,7 +552,7 @@ Trial plans made here open in the Plans Display too (10.9), and Plans Display tr
 | **Range nnn** | The width of the map in nm. Click for 10 to 1000 or type a value; the mouse wheel over the button or the map changes it too. |
 | **Suppress / Restore** | Limited or full data blocks (above). |
 | **Map Options...** | **Map Features** (below) and the **AC Display Menu**: Aircraft List filter (on: only ACL aircraft; off: all traffic in the ARTCC), automatic data block offsetting, altitude filter limits, route preview time (0, 2, 5, 10 or 20 minutes of route ahead of every aircraft). |
-| **Tools...** | **Airspace Status** (the SAAs in your ARTCC with floor and ceiling; alerting ones first in orange; click one to center the map on it), **Save GPD Map**, and Saved Map once saved. Airport Stream Filter Status, Options and Restrictions are grey (not on VATSIM). |
+| **Tools...** | **Airspace Status** (the SAAs in your ARTCC with floor and ceiling; alerting ones first in orange, then active ones marked `ACT`. SAAs are closed until you click one to activate it, and click again to close it. Right-click one to center the map on it), **Save GPD Map**, and Saved Map once saved. Airport Stream Filter Status, Options and Restrictions are grey (not on VATSIM). |
 | **Saved Map** | Back to the saved range and center. |
 | **Future Time** | 0 to 20 minutes ahead: drag the slider, click the bar to step a minute, middle-click to jump. Aircraft move along their routes at their ground speed; the title says `Future Time +n` and the window gets a wide white border. Alerts don't change. |
 
@@ -599,8 +599,11 @@ verified position to send (SEND or Ctrl+Enter). Click a message to mark it read 
 
 ### 10.7 Conflict probe
 
-Runs after every list update. It checks your aircraft against all traffic at the **same flight level** along the next
-120 nm of route, and against special-use airspace. It's visual only (no sounds).
+Runs after every list update. It checks your aircraft against all traffic along the next 120 nm of route and alerts
+only when two aircraft will be **within 5 nm and less than 1,000 ft apart**. Each aircraft climbs or descends from its
+present altitude toward its assigned altitude (else its filed altitude) at 2,000 ft/min, so aircraft that will be
+thousands of feet apart where their routes cross don't alert. It also checks special activity airspace, but only the SAAs
+you've activated in GPD Tools > Airspace Status; they're closed otherwise. It's visual only (no sounds).
 
 ### 10.8 LIST window
 
