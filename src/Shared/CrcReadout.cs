@@ -298,7 +298,62 @@ namespace VusaLinkApp
 
         class Pilot { public string Type, Squawk, AssignedSquawk, Logon; }
 
-        public CidBook() { Load(); }
+        // ERAMv2 (djbrombizzle/ERAMv2) reads CRC's QF readouts too and writes what it learns here; we write cids.json,
+        // which ERAMv2 reads. So a CID either program reads reaches both. [{cid, callsign, sector, at}]
+        static string SharedPath { get { return Path.Combine(AppPaths.Dir, "eramv2-cids.json"); } }
+        DateTime sharedStamp = DateTime.MinValue;
+        readonly System.Threading.Timer sharedTimer;
+
+        public CidBook()
+        {
+            Load();
+            sharedTimer = new System.Threading.Timer(_ => ImportShared(), null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(5));
+        }
+
+        // Takes the pairs ERAMv2 learned since the last look. Each must be a live VATSIM flight (exact callsign: ERAMv2
+        // only keeps readouts that match one) and newer than what we have for that callsign.
+        void ImportShared()
+        {
+            try
+            {
+                var stamp = File.Exists(SharedPath) ? File.GetLastWriteTimeUtc(SharedPath) : DateTime.MinValue;
+                if (stamp == DateTime.MinValue || stamp == sharedStamp) return;
+                var arr = Json.Parse(File.ReadAllText(SharedPath)) as List<object>;
+                if (arr == null) return;
+                RefreshFeed();
+                Dictionary<string, Pilot> f;
+                lock (sync) f = feed;
+                if (f.Count == 0) return;              // can't verify now: try again next tick
+                sharedStamp = stamp;
+                var learned = new List<string>();
+                lock (sync)
+                    foreach (var o in arr)
+                    {
+                        var cid = (Json.Str(o, "cid") ?? "").Trim().ToUpperInvariant();
+                        var cs = (Json.Str(o, "callsign") ?? "").Trim().ToUpperInvariant();
+                        var at = ParseTime(Json.Str(o, "at"));
+                        Pilot p;
+                        if (cid.Length != 3 || cs.Length == 0 || !f.TryGetValue(cs, out p)) continue;
+                        if (DateTime.UtcNow - at > UnverifiedTtl) continue;
+                        Entry cur;
+                        if (byCid.TryGetValue(cid, out cur) && cur.Callsign == cs && cur.At >= at) continue;
+                        if (byCid.Values.Any(e => e.Callsign == cs && e.At >= at)) continue;   // we read a newer QF ourselves
+                        foreach (var k in byCid.Where(kv => kv.Value.Callsign == cs && kv.Key != cid).Select(kv => kv.Key).ToList())
+                            byCid.Remove(k);
+                        byCid[cid] = new Entry
+                        {
+                            Callsign = cs, Sector = (Json.Str(o, "sector") ?? "").Trim().ToUpperInvariant(), Logon = p.Logon,
+                            Verified = true, At = at, LastSeen = DateTime.UtcNow
+                        };
+                        learned.Add("CID " + cid + " = " + cs);
+                    }
+                if (learned.Count == 0) return;
+                Log.Info("From ERAMv2: " + string.Join(", ", learned));
+                Save();
+                if (Changed != null) Changed();
+            }
+            catch (Exception) { /* ERAMv2 is writing it: next tick */ }
+        }
 
         public event Action Changed;   // a pair was learned or dropped (may fire off the UI thread)
 
@@ -462,6 +517,9 @@ namespace VusaLinkApp
             var pilots = feed.ToDictionary(kv => kv.Key, kv => kv.Value);
             if (cands.Count == 0)
             {
+                // The callsign is exactly a VATSIM flight and the OCR got no type or beacon off the readout (it often
+                // reads only "947 KAY6E(32)"): nothing contradicts it, so take it.
+                if (exactSeen && string.IsNullOrEmpty((r.Type ?? "").Trim()) && r.Beacon == null) return read;
                 if (exactSeen) reject = "type/beacon don't match VATSIM data for " + read;
                 return null;
             }

@@ -197,7 +197,8 @@ SKW5646. CRC keeps its own line with the CID.
   garbled it reads that spot again enlarged. The picture is processed in memory and never saved or sent; only the
   parsed readout line is logged.
 - **Checked before it's trusted:** the readout's callsign must be a real flight in the VATSIM data with a matching type
-  or beacon code. A misread character (OCR can read W as H, or D as 0) is corrected to the closest real flight. When
+  or beacon code. When the OCR reads only the first part of the readout (`947 KAY6E(32)`, no type or beacon), an exact
+  callsign match is enough. A misread character (OCR can read W as H, or D as 0) is corrected to the closest real flight. When
   several fit, for example a fleet of same-type flights one digit apart (FDX18, FDX19, FDX12), the readout's beacon
   code picks the right one, then the closest spelling. If it's still a tie, nothing is learned and the log says
   `ambiguous callsign`.
@@ -213,6 +214,10 @@ SKW5646. CRC keeps its own line with the CID.
   been gone from VATSIM for 3 minutes; the app checks every 30 seconds. QF the aircraft again after a reconnect. On a
   test server (flights not on VATSIM) pairs are kept for 12 hours. A newer QF always replaces older pairs for that
   CID or callsign.
+- **Shared with ERAMv2:** ERAMv2 reads CRC's QF readouts too. It writes the CIDs it learns to
+  `%LOCALAPPDATA%\vUSALinkApp\eramv2-cids.json`, and the app and Lite pick them up within about 5 seconds (only pairs
+  whose callsign is a live VATSIM flight, and never over a newer QF the app read itself). ERAMv2 reads the app's
+  `cids.json`, so a CID either program reads reaches both.
 
 ### What isn't mirrored
 
